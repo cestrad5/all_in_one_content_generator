@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Upload, X, Settings2, Download, Archive, Info, FileText, Image as ImageIcon, Sparkles, AlertCircle, Check, AlertTriangle } from "lucide-react";
+import { Upload, X, Settings2, Download, Archive, Info, FileText, Image as ImageIcon, Sparkles, AlertCircle, Check, AlertTriangle, Cloud, CloudUpload, Settings } from "lucide-react";
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 const CATEGORIES = ["Alcancias", "Cajas y Empaques", "Porta Llaves", "Portarretratos", "Temporada", "Varios"];
@@ -256,6 +256,21 @@ function triggerDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
+const loadGsiScript = () => {
+  return new Promise((resolve) => {
+    if (window.google) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    document.head.appendChild(script);
+  });
+};
+
 function ResultPreview({ blob, alt }) {
   const [url, setUrl] = useState("");
   
@@ -296,6 +311,17 @@ export default function App() {
   const [error,    setError]    = useState("");
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef();
+
+  // Google Drive Integration States
+  const [googleClientId, setGoogleClientId] = useState(() => localStorage.getItem("opt_google_client_id") || "");
+  const [googleFolderId, setGoogleFolderId] = useState(() => localStorage.getItem("opt_google_folder_id") || "");
+  const [showDriveConfig, setShowDriveConfig] = useState(false);
+  
+  const [driveUploading, setDriveUploading] = useState(false);
+  const [driveProgress, setDriveProgress] = useState(0);
+  const [driveProgressLabel, setDriveProgressLabel] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+  const [tokenExpiry, setTokenExpiry] = useState(0);
 
   const selectedMats = MATERIALS.filter(m => mats[m.key]);
   const matText = selectedMats.length === 1 ? MATERIAL_SLUG[selectedMats[0].key] : "madera";
@@ -381,6 +407,184 @@ export default function App() {
       r.altText, r.title, r.caption, r.description, r.keywords, r.copyright
     ].map(esc).join(","));
     triggerDownload(new Blob(["\uFEFF"+[heads.join(","),...rows].join("\n")],{type:"text/csv;charset=utf-8"}), `seo-${normalize(productName)}.csv`);
+  };
+
+  const saveGoogleConfig = (clientId, folderId) => {
+    localStorage.setItem("opt_google_client_id", clientId);
+    localStorage.setItem("opt_google_folder_id", folderId);
+    setGoogleClientId(clientId);
+    setGoogleFolderId(folderId);
+    setShowDriveConfig(false);
+  };
+
+  const getGoogleToken = async () => {
+    return new Promise(async (resolve, reject) => {
+      if (accessToken && Date.now() < tokenExpiry) {
+        resolve(accessToken);
+        return;
+      }
+
+      if (!googleClientId) {
+        setShowDriveConfig(true);
+        reject(new Error("Configura primero tu Client ID de Google Drive."));
+        return;
+      }
+
+      await loadGsiScript();
+
+      try {
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: googleClientId,
+          scope: "https://www.googleapis.com/auth/drive.file",
+          callback: (response) => {
+            if (response.error) {
+              reject(new Error(`Error de autenticación: ${response.error_description || response.error}`));
+              return;
+            }
+            setAccessToken(response.access_token);
+            setTokenExpiry(Date.now() + (response.expires_in - 60) * 1000);
+            resolve(response.access_token);
+          },
+        });
+        client.requestAccessToken();
+      } catch (err) {
+        reject(new Error(`Fallo inicialización de Google Auth: ${err.message}`));
+      }
+    });
+  };
+
+  const findOrCreateDriveFolder = async (token, folderName) => {
+    const parentPart = googleFolderId ? `'${googleFolderId}' in parents and ` : "";
+    const query = `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and ${parentPart}trashed = false`;
+    
+    const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id)`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    
+    if (!searchRes.ok) {
+      const errData = await searchRes.json();
+      throw new Error(`Error buscando carpeta: ${errData.error?.message || searchRes.statusText}`);
+    }
+    
+    const searchData = await searchRes.json();
+    if (searchData.files && searchData.files.length > 0) {
+      return searchData.files[0].id;
+    }
+    
+    const createBody = {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder"
+    };
+    if (googleFolderId) {
+      createBody.parents = [googleFolderId];
+    }
+    
+    const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(createBody)
+    });
+    
+    if (!createRes.ok) {
+      const errData = await createRes.json();
+      throw new Error(`Error creando carpeta: ${errData.error?.message || createRes.statusText}`);
+    }
+    
+    const createData = await createRes.json();
+    return createData.id;
+  };
+
+  const uploadToDrive = async (token, folderId, filename, blob) => {
+    const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: filename,
+        parents: [folderId]
+      })
+    });
+    
+    if (!createRes.ok) {
+      const errData = await createRes.json();
+      throw new Error(`Error creando metadatos de ${filename}: ${errData.error?.message || createRes.statusText}`);
+    }
+    
+    const { id } = await createRes.json();
+    
+    const uploadRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, {
+      method: "PATCH",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": blob.type
+      },
+      body: blob
+    });
+    
+    if (!uploadRes.ok) {
+      const errData = await uploadRes.json();
+      throw new Error(`Error al subir datos de ${filename}: ${errData.error?.message || uploadRes.statusText}`);
+    }
+    
+    return id;
+  };
+
+  const uploadBatchToDrive = async () => {
+    const ref = productRef.trim();
+    if (!ref) {
+      setError("La referencia (REF) es obligatoria para crear la carpeta en Google Drive.");
+      return;
+    }
+    
+    setDriveUploading(true);
+    setDriveProgress(0);
+    setDriveProgressLabel("Autenticando con Google...");
+    setError("");
+
+    try {
+      const token = await getGoogleToken();
+      setDriveProgressLabel(`Buscando o creando carpeta REF-${ref}...`);
+      setDriveProgress(10);
+      
+      const folderName = `REF-${ref}`;
+      const folderId = await findOrCreateDriveFolder(token, folderName);
+      
+      const totalFiles = results.length + 1; // +1 para el CSV
+      let uploadedCount = 0;
+      
+      for (const item of results) {
+        setDriveProgressLabel(`Subiendo ${item.newName}...`);
+        await uploadToDrive(token, folderId, item.newName, item.compressedBlob);
+        uploadedCount++;
+        setDriveProgress(Math.round(10 + (uploadedCount / totalFiles) * 80));
+      }
+      
+      setDriveProgressLabel("Subiendo metadata SEO (.csv)...");
+      const esc = v => `"${String(v).replace(/"/g,'""')}"`;
+      const heads = ["archivo_original","archivo_nuevo","tamaño_original","tamaño_comprimido","dimensiones","IA_recorte","alt_text","title","caption","description","keywords","copyright"];
+      const rows  = results.map(r => [
+        r.originalName, r.newName, fmtBytes(r.originalSize), fmtBytes(r.compressedSize), r.dimensions, r.bgRemoved?"Si":"No",
+        r.altText, r.title, r.caption, r.description, r.keywords, r.copyright
+      ].map(esc).join(","));
+      const csvBlob = new Blob(["\uFEFF"+[heads.join(","),...rows].join("\n")],{type:"text/csv;charset=utf-8"});
+      
+      await uploadToDrive(token, folderId, `seo-${normalize(productName)}.csv`, csvBlob);
+      
+      setDriveProgress(100);
+      setDriveProgressLabel("¡Proceso de subida completado con éxito!");
+      setTimeout(() => {
+        setDriveUploading(false);
+      }, 4000);
+    } catch (err) {
+      console.error(err);
+      setError(`Google Drive: ${err.message}`);
+      setDriveUploading(false);
+    }
   };
 
   const isProcessing = phase==="processing" || phase==="zipping";
@@ -541,10 +745,71 @@ export default function App() {
             </div>
           </div>
 
+          {/* Configuración de Google Drive */}
+          {showDriveConfig && (
+            <div className="drive-panel animate-fade-in" style={{ padding: "20px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: "12px", marginBottom: "20px" }}>
+              <div className="drive-config-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <h4 style={{ margin: 0, color: "#1e3a8a", display: "flex", alignItems: "center", gap: "8px" }}><Settings size={18}/> Configuración de Google Drive</h4>
+                <button className="btn-icon-only" onClick={() => setShowDriveConfig(false)}><X size={14}/></button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                <div>
+                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>Google Client ID (OAuth Web)</label>
+                  <input 
+                    className="input-field" 
+                    placeholder="xxxxxxxx.apps.googleusercontent.com" 
+                    value={googleClientId} 
+                    onChange={e => setGoogleClientId(e.target.value)} 
+                    style={{ border: "1px solid #93c5fd" }}
+                  />
+                  <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
+                    Obtén el ID de cliente de la consola de Google Cloud Developer.
+                  </div>
+                </div>
+                <div>
+                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>ID de Carpeta Destino (Opcional)</label>
+                  <input 
+                    className="input-field" 
+                    placeholder="ID de carpeta (raíz por defecto)" 
+                    value={googleFolderId} 
+                    onChange={e => setGoogleFolderId(e.target.value)} 
+                    style={{ border: "1px solid #93c5fd" }}
+                  />
+                  <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
+                    Si se proporciona, las carpetas de referencia se crearán dentro de ella.
+                  </div>
+                </div>
+              </div>
+              <div style={{ marginTop: "16px", display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                <button className="btn btn-outline" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => setShowDriveConfig(false)}>Cancelar</button>
+                <button className="btn btn-primary" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => saveGoogleConfig(googleClientId, googleFolderId)}>Guardar</button>
+              </div>
+            </div>
+          )}
+
           <div style={{display:"flex", flexWrap:"wrap", gap:"16px", justifyContent:"center", paddingBottom:"20px", borderBottom:"1px solid rgba(0,0,0,0.05)"}}>
             <button className="btn btn-primary" onClick={downloadZip}><Archive size={18}/> Descargar Lote (.zip)</button>
             <button className="btn btn-secondary" onClick={downloadCSV}><FileText size={18}/> Bajar Metadata (.csv)</button>
+            <button className="btn btn-drive" onClick={uploadBatchToDrive} disabled={driveUploading || results.length === 0}>
+              <CloudUpload size={18}/> Guardar en Drive
+            </button>
+            <button className="btn btn-icon-only" title="Configurar Google Drive" onClick={() => setShowDriveConfig(!showDriveConfig)}>
+              <Settings size={18}/>
+            </button>
           </div>
+
+          {/* Progreso de subida a Google Drive */}
+          {driveUploading && (
+            <div className="drive-progress-card animate-fade-in">
+              <div style={{ marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h4 style={{ color: "#166534", margin: 0, fontSize: "0.95rem", display: "flex", alignItems: "center", gap: "6px" }}><Cloud size={16}/> {driveProgressLabel}</h4>
+                <span style={{ fontWeight: 700, color: "#166534", fontSize: "0.95rem" }}>{driveProgress}%</span>
+              </div>
+              <div className="progress-container" style={{ background: "#d1fae5", height: "10px" }}>
+                <div className="progress-fill" style={{ width: `${driveProgress}%`, background: "linear-gradient(90deg, #34d399, #059669)" }} />
+              </div>
+            </div>
+          )}
 
           <div style={{marginTop:"24px"}}>
             <h3 style={{fontSize:"1rem", marginBottom:"12px", display:"flex", alignItems:"center", gap:"8px"}}><ImageIcon size={18}/> Imágenes Procesadas ({results.length})</h3>
