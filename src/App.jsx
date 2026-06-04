@@ -314,6 +314,7 @@ export default function App() {
 
   // Google Drive Integration States
   const [googleFolderId, setGoogleFolderId] = useState(() => localStorage.getItem("opt_google_folder_id") || "");
+  const [googleGeminiKey, setGoogleGeminiKey] = useState(() => localStorage.getItem("opt_google_gemini_key") || "");
   const [showDriveConfig, setShowDriveConfig] = useState(false);
   
   const [driveUploading, setDriveUploading] = useState(false);
@@ -406,9 +407,11 @@ export default function App() {
     triggerDownload(new Blob(["\uFEFF"+[heads.join(","),...rows].join("\n")],{type:"text/csv;charset=utf-8"}), `seo-${normalize(productName)}.csv`);
   };
 
-  const saveGoogleConfig = (folderId) => {
+  const saveGoogleConfig = (folderId, geminiKey) => {
     localStorage.setItem("opt_google_folder_id", folderId);
+    localStorage.setItem("opt_google_gemini_key", geminiKey);
     setGoogleFolderId(folderId);
+    setGoogleGeminiKey(geminiKey);
     setShowDriveConfig(false);
   };
 
@@ -474,6 +477,9 @@ export default function App() {
       });
 
       xhr.open("POST", "/api/upload-batch");
+      if (googleGeminiKey) {
+        xhr.setRequestHeader("x-gemini-key", googleGeminiKey.trim());
+      }
       xhr.send(formData);
 
       setDriveProgressLabel("Enviando archivos y alimentando Google Sheets...");
@@ -655,25 +661,41 @@ export default function App() {
           {showDriveConfig && (
             <div className="drive-panel animate-fade-in" style={{ padding: "20px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: "12px", marginBottom: "20px" }}>
               <div className="drive-config-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                <h4 style={{ margin: 0, color: "#1e3a8a", display: "flex", alignItems: "center", gap: "8px" }}><Settings size={18}/> Configuración de Google Drive</h4>
+                <h4 style={{ margin: 0, color: "#1e3a8a", display: "flex", alignItems: "center", gap: "8px" }}><Settings size={18}/> Configuración de Google Drive & AI</h4>
                 <button className="btn-icon-only" onClick={() => setShowDriveConfig(false)}><X size={14}/></button>
               </div>
-              <div style={{ display: "block", marginBottom: "16px" }}>
-                <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>ID de Carpeta Destino en Google Drive (Opcional)</label>
-                <input 
-                  className="input-field" 
-                  placeholder="ID de carpeta (raíz por defecto)" 
-                  value={googleFolderId} 
-                  onChange={e => setGoogleFolderId(e.target.value)} 
-                  style={{ border: "1px solid #93c5fd" }}
-                />
-                <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
-                  Las nuevas carpetas de productos se crearán dentro de la carpeta con este ID. Si lo dejas en blanco, se guardarán en la raíz de la cuenta de servicio.
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+                <div>
+                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>ID de Carpeta Destino (Opcional)</label>
+                  <input 
+                    className="input-field" 
+                    placeholder="ID de carpeta (raíz por defecto)" 
+                    value={googleFolderId} 
+                    onChange={e => setGoogleFolderId(e.target.value)} 
+                    style={{ border: "1px solid #93c5fd" }}
+                  />
+                  <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
+                    Las nuevas carpetas se crearán dentro de esta carpeta.
+                  </div>
+                </div>
+                <div>
+                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>Gemini API Key (Opcional)</label>
+                  <input 
+                    type="password"
+                    className="input-field" 
+                    placeholder="AIzaSy..." 
+                    value={googleGeminiKey} 
+                    onChange={e => setGoogleGeminiKey(e.target.value)} 
+                    style={{ border: "1px solid #93c5fd" }}
+                  />
+                  <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
+                    Clave para habilitar el generador de copywriting SEO con IA.
+                  </div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
                 <button className="btn btn-outline" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => setShowDriveConfig(false)}>Cancelar</button>
-                <button className="btn btn-primary" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => saveGoogleConfig(googleFolderId)}>Guardar</button>
+                <button className="btn btn-primary" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => saveGoogleConfig(googleFolderId, googleGeminiKey)}>Guardar</button>
               </div>
             </div>
           )}
