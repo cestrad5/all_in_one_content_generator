@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  content-generator-frontend:
+    container_name: content-generator-frontend
+    build: .
+    restart: unless-stopped
+    ports:
+      # Host:3002 -> Container:80 (Nginx interno)
+      # Escucha solo en localhost para seguridad
+      - "127.0.0.1:3002:80"
