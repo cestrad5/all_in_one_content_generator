@@ -313,15 +313,12 @@ export default function App() {
   const fileRef = useRef();
 
   // Google Drive Integration States
-  const [googleClientId, setGoogleClientId] = useState(() => localStorage.getItem("opt_google_client_id") || "");
   const [googleFolderId, setGoogleFolderId] = useState(() => localStorage.getItem("opt_google_folder_id") || "");
   const [showDriveConfig, setShowDriveConfig] = useState(false);
   
   const [driveUploading, setDriveUploading] = useState(false);
   const [driveProgress, setDriveProgress] = useState(0);
   const [driveProgressLabel, setDriveProgressLabel] = useState("");
-  const [accessToken, setAccessToken] = useState("");
-  const [tokenExpiry, setTokenExpiry] = useState(0);
 
   const selectedMats = MATERIALS.filter(m => mats[m.key]);
   const matText = selectedMats.length === 1 ? MATERIAL_SLUG[selectedMats[0].key] : "madera";
@@ -409,180 +406,89 @@ export default function App() {
     triggerDownload(new Blob(["\uFEFF"+[heads.join(","),...rows].join("\n")],{type:"text/csv;charset=utf-8"}), `seo-${normalize(productName)}.csv`);
   };
 
-  const saveGoogleConfig = (clientId, folderId) => {
-    localStorage.setItem("opt_google_client_id", clientId);
+  const saveGoogleConfig = (folderId) => {
     localStorage.setItem("opt_google_folder_id", folderId);
-    setGoogleClientId(clientId);
     setGoogleFolderId(folderId);
     setShowDriveConfig(false);
-  };
-
-  const getGoogleToken = async () => {
-    return new Promise(async (resolve, reject) => {
-      if (accessToken && Date.now() < tokenExpiry) {
-        resolve(accessToken);
-        return;
-      }
-
-      if (!googleClientId) {
-        setShowDriveConfig(true);
-        reject(new Error("Configura primero tu Client ID de Google Drive."));
-        return;
-      }
-
-      await loadGsiScript();
-
-      try {
-        const client = window.google.accounts.oauth2.initTokenClient({
-          client_id: googleClientId,
-          scope: "https://www.googleapis.com/auth/drive.file",
-          callback: (response) => {
-            if (response.error) {
-              reject(new Error(`Error de autenticación: ${response.error_description || response.error}`));
-              return;
-            }
-            setAccessToken(response.access_token);
-            setTokenExpiry(Date.now() + (response.expires_in - 60) * 1000);
-            resolve(response.access_token);
-          },
-        });
-        client.requestAccessToken();
-      } catch (err) {
-        reject(new Error(`Fallo inicialización de Google Auth: ${err.message}`));
-      }
-    });
-  };
-
-  const findOrCreateDriveFolder = async (token, folderName) => {
-    const parentPart = googleFolderId ? `'${googleFolderId}' in parents and ` : "";
-    const query = `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and ${parentPart}trashed = false`;
-    
-    const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id)`, {
-      headers: { "Authorization": `Bearer ${token}` }
-    });
-    
-    if (!searchRes.ok) {
-      const errData = await searchRes.json();
-      throw new Error(`Error buscando carpeta: ${errData.error?.message || searchRes.statusText}`);
-    }
-    
-    const searchData = await searchRes.json();
-    if (searchData.files && searchData.files.length > 0) {
-      return searchData.files[0].id;
-    }
-    
-    const createBody = {
-      name: folderName,
-      mimeType: "application/vnd.google-apps.folder"
-    };
-    if (googleFolderId) {
-      createBody.parents = [googleFolderId];
-    }
-    
-    const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(createBody)
-    });
-    
-    if (!createRes.ok) {
-      const errData = await createRes.json();
-      throw new Error(`Error creando carpeta: ${errData.error?.message || createRes.statusText}`);
-    }
-    
-    const createData = await createRes.json();
-    return createData.id;
-  };
-
-  const uploadToDrive = async (token, folderId, filename, blob) => {
-    const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        name: filename,
-        parents: [folderId]
-      })
-    });
-    
-    if (!createRes.ok) {
-      const errData = await createRes.json();
-      throw new Error(`Error creando metadatos de ${filename}: ${errData.error?.message || createRes.statusText}`);
-    }
-    
-    const { id } = await createRes.json();
-    
-    const uploadRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, {
-      method: "PATCH",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": blob.type
-      },
-      body: blob
-    });
-    
-    if (!uploadRes.ok) {
-      const errData = await uploadRes.json();
-      throw new Error(`Error al subir datos de ${filename}: ${errData.error?.message || uploadRes.statusText}`);
-    }
-    
-    return id;
   };
 
   const uploadBatchToDrive = async () => {
     const ref = productRef.trim();
     if (!ref) {
-      setError("La referencia (REF) es obligatoria para crear la carpeta en Google Drive.");
+      setError("La referencia (REF) es obligatoria para guardar en Google Drive.");
       return;
     }
     
     setDriveUploading(true);
     setDriveProgress(0);
-    setDriveProgressLabel("Autenticando con Google...");
+    setDriveProgressLabel("Preparando lote de archivos...");
     setError("");
 
     try {
-      const token = await getGoogleToken();
-      setDriveProgressLabel(`Buscando o creando carpeta REF-${ref}...`);
-      setDriveProgress(10);
+      const formData = new FormData();
+      const filenames = [];
       
-      const folderName = `REF-${ref}`;
-      const folderId = await findOrCreateDriveFolder(token, folderName);
+      results.forEach((item) => {
+        formData.append("files", item.compressedBlob, item.newName);
+        filenames.push(item.newName);
+      });
       
-      const totalFiles = results.length + 1; // +1 para el CSV
-      let uploadedCount = 0;
-      
-      for (const item of results) {
-        setDriveProgressLabel(`Subiendo ${item.newName}...`);
-        await uploadToDrive(token, folderId, item.newName, item.compressedBlob);
-        uploadedCount++;
-        setDriveProgress(Math.round(10 + (uploadedCount / totalFiles) * 80));
+      formData.append("filenames", JSON.stringify(filenames));
+      formData.append("ref", ref);
+      formData.append("name", productName.trim());
+      formData.append("category", category);
+      formData.append("description", results[0]?.description || "");
+      if (googleFolderId) {
+        formData.append("parentFolderId", googleFolderId.trim());
       }
+
+      const xhr = new XMLHttpRequest();
       
-      setDriveProgressLabel("Subiendo metadata SEO (.csv)...");
-      const esc = v => `"${String(v).replace(/"/g,'""')}"`;
-      const heads = ["archivo_original","archivo_nuevo","tamaño_original","tamaño_comprimido","dimensiones","IA_recorte","alt_text","title","caption","description","keywords","copyright"];
-      const rows  = results.map(r => [
-        r.originalName, r.newName, fmtBytes(r.originalSize), fmtBytes(r.compressedSize), r.dimensions, r.bgRemoved?"Si":"No",
-        r.altText, r.title, r.caption, r.description, r.keywords, r.copyright
-      ].map(esc).join(","));
-      const csvBlob = new Blob(["\uFEFF"+[heads.join(","),...rows].join("\n")],{type:"text/csv;charset=utf-8"});
-      
-      await uploadToDrive(token, folderId, `seo-${normalize(productName)}.csv`, csvBlob);
-      
+      xhr.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = Math.round((event.loaded / event.total) * 90);
+          setDriveProgress(percentComplete);
+          setDriveProgressLabel(`Subiendo imágenes al servidor (${percentComplete}%)...`);
+        }
+      });
+
+      const uploadPromise = new Promise((resolve, reject) => {
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const res = JSON.parse(xhr.responseText);
+              resolve(res);
+            } catch (e) {
+              reject(new Error("Respuesta inválida del servidor."));
+            }
+          } else {
+            try {
+              const res = JSON.parse(xhr.responseText);
+              reject(new Error(res.error || `Error del servidor (${xhr.status})`));
+            } catch (e) {
+              reject(new Error(`Error en la subida (${xhr.status})`));
+            }
+          }
+        };
+        xhr.onerror = () => reject(new Error("Error de conexión con el servidor."));
+      });
+
+      xhr.open("POST", "/api/upload-batch");
+      xhr.send(formData);
+
+      setDriveProgressLabel("Enviando archivos y alimentando Google Sheets...");
+      const response = await uploadPromise;
+
       setDriveProgress(100);
-      setDriveProgressLabel("¡Proceso de subida completado con éxito!");
+      setDriveProgressLabel("¡Imágenes guardadas en Drive y registradas en Google Sheets!");
+      
       setTimeout(() => {
         setDriveUploading(false);
-      }, 4000);
+      }, 5000);
+
     } catch (err) {
       console.error(err);
-      setError(`Google Drive: ${err.message}`);
+      setError(`Error al guardar en Drive/Sheets: ${err.message}`);
       setDriveUploading(false);
     }
   };
@@ -752,37 +658,22 @@ export default function App() {
                 <h4 style={{ margin: 0, color: "#1e3a8a", display: "flex", alignItems: "center", gap: "8px" }}><Settings size={18}/> Configuración de Google Drive</h4>
                 <button className="btn-icon-only" onClick={() => setShowDriveConfig(false)}><X size={14}/></button>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                <div>
-                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>Google Client ID (OAuth Web)</label>
-                  <input 
-                    className="input-field" 
-                    placeholder="xxxxxxxx.apps.googleusercontent.com" 
-                    value={googleClientId} 
-                    onChange={e => setGoogleClientId(e.target.value)} 
-                    style={{ border: "1px solid #93c5fd" }}
-                  />
-                  <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
-                    Obtén el ID de cliente de la consola de Google Cloud Developer.
-                  </div>
-                </div>
-                <div>
-                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>ID de Carpeta Destino (Opcional)</label>
-                  <input 
-                    className="input-field" 
-                    placeholder="ID de carpeta (raíz por defecto)" 
-                    value={googleFolderId} 
-                    onChange={e => setGoogleFolderId(e.target.value)} 
-                    style={{ border: "1px solid #93c5fd" }}
-                  />
-                  <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
-                    Si se proporciona, las carpetas de referencia se crearán dentro de ella.
-                  </div>
+              <div style={{ display: "block", marginBottom: "16px" }}>
+                <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>ID de Carpeta Destino en Google Drive (Opcional)</label>
+                <input 
+                  className="input-field" 
+                  placeholder="ID de carpeta (raíz por defecto)" 
+                  value={googleFolderId} 
+                  onChange={e => setGoogleFolderId(e.target.value)} 
+                  style={{ border: "1px solid #93c5fd" }}
+                />
+                <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
+                  Las nuevas carpetas de productos se crearán dentro de la carpeta con este ID. Si lo dejas en blanco, se guardarán en la raíz de la cuenta de servicio.
                 </div>
               </div>
-              <div style={{ marginTop: "16px", display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
                 <button className="btn btn-outline" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => setShowDriveConfig(false)}>Cancelar</button>
-                <button className="btn btn-primary" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => saveGoogleConfig(googleClientId, googleFolderId)}>Guardar</button>
+                <button className="btn btn-primary" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => saveGoogleConfig(googleFolderId)}>Guardar</button>
               </div>
             </div>
           )}

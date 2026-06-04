@@ -6,6 +6,27 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      # Host:3002 -> Container:80 (Nginx interno)
-      # Escucha solo en localhost para seguridad
-      - "127.0.0.1:3002:80"
+      - "3002:80" # Permitir peticiones desde el host
+    depends_on:
+      - content-generator-backend
+    networks:
+      - app-network
+
+  content-generator-backend:
+    container_name: content-generator-backend
+    build: ./backend
+    restart: unless-stopped
+    expose:
+      - "5002"
+    env_file:
+      - ./backend/.env
+    volumes:
+      # Copiaremos el service-account.json en el VPS a esta carpeta
+      - /opt/all_in_one_content_generator/backend/service-account.json:/app/service-account.json:ro
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
