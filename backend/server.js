@@ -126,185 +126,68 @@ app.get('/api/health', (req, res) => {
 
 // Ruta principal para subir el lote e integrar Sheets
 app.post('/api/upload-batch', upload.array('files', 20), async (req, res) => {
-  try {
-    const { ref, name, category, description, parentFolderId } = req.body;
-    const files = req.files;
-    
-    // Obtener la API key de Gemini (desde cabeceras o desde .env)
-    const geminiApiKey = req.headers['x-gemini-key'] || process.env.GEMINI_API_KEY;
-    
-    // Parsear los nombres de archivo enviados desde el cliente
-    let filenames = [];
+  const { ref, name, category, description, parentFolderId } = req.body;
+  const files = req.files;
+  const geminiApiKey = req.headers['x-gemini-key'] || process.env.GEMINI_API_KEY;
+
+  if (!ref) return res.status(400).json({ error: 'La referencia (ref) es obligatoria.' });
+
+  // 1. Generar Copywriting siempre primero
+  const seoCopy = await generateSeoCopy(geminiApiKey, ref, name, category, description);
+
+  // Ejecución no bloqueante para Drive y Sheets
+  (async () => {
     try {
-      filenames = JSON.parse(req.body.filenames || '[]');
+      const auth = getGoogleAuth();
+      const drive = google.drive({ version: 'v3', auth });
+      const sheets = google.sheets({ version: 'v4', auth });
+
+      const folderName = `REF-${ref.trim()}`;
+      const pFolderId = parentFolderId || process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID;
+      const folderQuery = `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and ${pFolderId ? `'${pFolderId}' in parents and ` : ""}trashed = false`;
+      
+      let folderId;
+      const searchFolder = await drive.files.list({ q: folderQuery, fields: 'files(id)', spaces: 'drive' });
+      
+      if (searchFolder.data.files && searchFolder.data.files.length > 0) {
+        folderId = searchFolder.data.files[0].id;
+      } else {
+        const folderMetadata = { name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: pFolderId ? [pFolderId] : [] };
+        const newFolder = await drive.files.create({ requestBody: folderMetadata, fields: 'id' });
+        folderId = newFolder.data.id;
+      }
+
+      const imageUrls = [];
+      for (const file of files) {
+        const driveFile = await drive.files.create({
+          requestBody: { name: file.originalname, parents: [folderId] },
+          media: { mimeType: file.mimetype, body: Readable.from(file.buffer) },
+          fields: 'id, webViewLink'
+        });
+        await drive.permissions.create({ fileId: driveFile.data.id, requestBody: { role: 'reader', type: 'anyone' } });
+        imageUrls.push(driveFile.data.webViewLink);
+      }
+
+      if (seoCopy) {
+        const txtContent = `--- CONFIGURACIÓN YOAST SEO ---\nFrase clave: ${seoCopy.keyphrase}\n--- DESCRIPCIÓN LARGA ---\n${seoCopy.longDescription}`;
+        await drive.files.create({
+          requestBody: { name: `yoast-seo-ref-${ref}.txt`, parents: [folderId] },
+          media: { mimeType: 'text/plain', body: Readable.from(Buffer.from(txtContent, 'utf-8')) }
+        });
+      }
+
+      const sheetId = process.env.GOOGLE_SHEET_ID;
+      if (sheetId) {
+        const finalDescription = seoCopy ? `${seoCopy.technicalHtml}\n\n${seoCopy.longDescription}` : (description || '');
+        const row = [ref.trim(), name || '', category || '', finalDescription, ...imageUrls.slice(0, 10)];
+        await sheets.spreadsheets.values.append({ spreadsheetId: sheetId, range: 'A:N', valueInputOption: 'USER_ENTERED', requestBody: { values: [row] } });
+      }
     } catch (e) {
-      filenames = files.map(f => f.originalname);
+      console.error('Error en proceso en background (Drive/Sheets):', e);
     }
+  })();
 
-    if (!ref) {
-      return res.status(400).json({ error: 'La referencia (ref) es obligatoria.' });
-    }
-    if (!files || files.length === 0) {
-      return res.status(400).json({ error: 'No se enviaron archivos para procesar.' });
-    }
-
-    // 1. Generar Copywriting optimizado con Gemini si hay API Key disponible
-    console.log('Llamando a generador de SEO/Copywriting...');
-    const seoCopy = await generateSeoCopy(geminiApiKey, ref, name, category, description);
-    
-    let finalDescription = description || '';
-    if (seoCopy) {
-      finalDescription = `${seoCopy.technicalHtml}\n\n${seoCopy.longDescription}`;
-      console.log('Copia SEO generada con éxito.');
-    } else {
-      console.log('No se pudo generar copia SEO con IA. Usando descripción básica.');
-    }
-
-    const auth = getGoogleAuth();
-    const drive = google.drive({ version: 'v3', auth });
-    const sheets = google.sheets({ version: 'v4', auth });
-
-    // 2. Buscar o Crear carpeta en Google Drive con la Referencia
-    const folderName = `REF-${ref.trim()}`;
-    const pFolderId = parentFolderId || process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID;
-    
-    const parentPart = pFolderId ? `'${pFolderId}' in parents and ` : "";
-    const folderQuery = `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and ${parentPart}trashed = false`;
-    
-    let folderId;
-    const searchFolder = await drive.files.list({
-      q: folderQuery,
-      fields: 'files(id)',
-      spaces: 'drive'
-    });
-
-    if (searchFolder.data.files && searchFolder.data.files.length > 0) {
-      folderId = searchFolder.data.files[0].id;
-    } else {
-      const folderMetadata = {
-        name: folderName,
-        mimeType: 'application/vnd.google-apps.folder'
-      };
-      if (pFolderId) {
-        folderMetadata.parents = [pFolderId];
-      }
-      const newFolder = await drive.files.create({
-        requestBody: folderMetadata,
-        fields: 'id'
-      });
-      folderId = newFolder.data.id;
-    }
-
-    // 3. Subir cada imagen a la carpeta y hacerla pública
-    const imageUrls = [];
-    
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const targetName = filenames[i] || file.originalname;
-
-      const fileMetadata = {
-        name: targetName,
-        parents: [folderId]
-      };
-
-      const media = {
-        mimeType: file.mimetype || 'image/webp',
-        body: Readable.from(file.buffer)
-      };
-
-      const driveFile = await drive.files.create({
-        requestBody: fileMetadata,
-        media: media,
-        fields: 'id, webViewLink'
-      });
-
-      // Hacer que el archivo sea accesible de manera pública (lectura)
-      await drive.permissions.create({
-        fileId: driveFile.data.id,
-        requestBody: {
-          role: 'reader',
-          type: 'anyone'
-        }
-      });
-
-      // Guardar el enlace
-      imageUrls.push(driveFile.data.webViewLink);
-    }
-
-    // 4. Subir archivo TXT de configuración Yoast SEO a Drive si se generó
-    if (seoCopy) {
-      const txtContent = `--- CONFIGURACIÓN YOAST SEO ---
-Frase clave objetivo: ${seoCopy.keyphrase}
-Título SEO: ${seoCopy.seoTitle}
-Slug: ${seoCopy.slug}
-Meta descripción: ${seoCopy.metaDescription}
-Texto ALT sugerido: ${seoCopy.altText}
-
---- INFORMACIÓN TÉCNICA (HTML) ---
-${seoCopy.technicalHtml.replace(/<br>/g, '\n')}
-
---- DESCRIPCIÓN LARGA (+300 PALABRAS) ---
-${seoCopy.longDescription}
-`;
-
-      const txtMetadata = {
-        name: `yoast-seo-ref-${ref}.txt`,
-        parents: [folderId]
-      };
-
-      const txtMedia = {
-        mimeType: 'text/plain',
-        body: Readable.from(Buffer.from(txtContent, 'utf-8'))
-      };
-
-      await drive.files.create({
-        requestBody: txtMetadata,
-        media: txtMedia,
-        fields: 'id'
-      });
-    }
-
-    // 5. Alimentar la tabla de Google Sheets
-    // Estructura: REF | Nombre | Cetegoria | Description | Imagen 1 | ... | Imagen 10
-    const sheetId = process.env.GOOGLE_SHEET_ID;
-    if (sheetId) {
-      const row = [
-        ref.trim(),
-        name || '',
-        category || '',
-        finalDescription
-      ];
-
-      // Añadir links de imágenes hasta 10
-      for (let i = 0; i < 10; i++) {
-        row.push(imageUrls[i] || '');
-      }
-
-      const range = 'A:N'; // Columnas de la A a la N (14 columnas)
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: sheetId,
-        range: range,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-          values: [row]
-        }
-      });
-    }
-
-    res.json({
-      success: true,
-      folderId: folderId,
-      folderName: folderName,
-      uploadedCount: files.length,
-      imageUrls: imageUrls,
-      seoGenerated: !!seoCopy,
-      seoData: seoCopy || null
-    });
-
-  } catch (error) {
-    console.error('Error procesando subida:', error);
-    res.status(500).json({ error: error.message || 'Error interno del servidor' });
-  }
+  res.json({ success: true, seoGenerated: !!seoCopy, seoData: seoCopy || null });
 });
 
 app.listen(PORT, () => {
