@@ -77,7 +77,13 @@ Genera un objeto JSON válido con la siguiente estructura exacta:
   "metaDescription": "Meta descripción persuasiva (140-156 caracteres)",
   "altText": "Texto ALT sugerido para Google Imágenes",
   "technicalHtml": "Bloque de código HTML con REF, medidas estimadas en cm y valoración 4.8+ con estrellas como el ejemplo",
-  "longDescription": "Descripción larga (+300 palabras) según las directrices"
+  "longDescription": "Descripción larga (+300 palabras) según las directrices",
+  "socialMedia": {
+    "instagram": "copy aquí",
+    "facebook": "copy aquí",
+    "whatsapp": "copy aquí",
+    "tiktok": "copy aquí"
+  }
 }
 
 Directrices estrictas para el contenido en el JSON:
@@ -105,6 +111,19 @@ Redacta una descripción extensa y fluida:
 - Enlace interno: En el párrafo de cierre, invita al usuario a seguir navegando usando el formato [https://publicador.bonettoconamor.com/varios] (o la categoría correspondiente en minúsculas).
 - Perspectiva de marca: Usa la voz de la marca intercalando la primera persona del plural ("Nosotros fabricamos", "En Bonetto con Amor diseñamos") con los beneficios directos para el comprador en segunda persona ("Tú puedes organizar", "Para que tú sorprendas").
 - Cierre: Termina el texto con la palabra "REF: ${ref}".
+
+4. COPIES PARA REDES SOCIALES (socialMedia):
+Eres el redactor de contenido de Bonetto con Amor, marca colombiana de productos decorativos en madera para emprendedoras de detalles y negocios de regalos. Genera 4 copies, uno por cada red social, basados en esta información:
+- Producto: ${name}
+- Categoría: ${category}
+- Palabras clave: ${originalDescription}
+Tono: cercano, humano, enfocado en emprendedoras. Creativo y alineado con tendencias actuales. Pocos emojis (máximo 2 por copy). Extensión media: 3 a 5 líneas.
+Palabras clave de marca (alterna entre ellas, no uses la misma en los 4 copies): "Hecho en Colombia" / "Ideal para emprendedoras" / "Listo para personalizar" / "Fabricación local" / "Entrega rápida" / "Producto colombiano".
+Instrucciones por red:
+- instagram: Tono emocional y aspiracional. Incluye hashtags relevantes y al menos 2 palabras clave en tendencia del momento para productos de regalo o emprendimiento en Colombia.
+- facebook: Más descriptivo. Explica el uso y los beneficios del producto. Mantén cercanía y calidez.
+- whatsapp: Directo, máximo 3 líneas, orientado a venta inmediata. Sin hashtags. Incluye CTA suave como "Haz tu pedido" o "Escríbenos hoy".
+- tiktok: Dinámico, con hook de apertura impactante en la primera línea. Usa palabras clave virales actuales. Ritmo ágil, frases cortas.
 
 Devuelve exclusivamente el JSON sin código Markdown adicional alrededor, para que pueda ser parseado directamente con JSON.parse.`;
 
@@ -169,7 +188,8 @@ app.post('/api/upload-batch', upload.array('files', 20), async (req, res) => {
       }
 
       if (seoCopy) {
-        const txtContent = `--- CONFIGURACIÓN YOAST SEO ---\nFrase clave: ${seoCopy.keyphrase}\n--- DESCRIPCIÓN LARGA ---\n${seoCopy.longDescription}`;
+        const socialMediaTxt = seoCopy.socialMedia ? `\n\n--- REDES SOCIALES ---\nInstagram:\n${seoCopy.socialMedia.instagram}\n\nFacebook:\n${seoCopy.socialMedia.facebook}\n\nWhatsApp:\n${seoCopy.socialMedia.whatsapp}\n\nTikTok:\n${seoCopy.socialMedia.tiktok}` : '';
+        const txtContent = `--- CONFIGURACIÓN YOAST SEO ---\nFrase clave: ${seoCopy.keyphrase}\n--- DESCRIPCIÓN LARGA ---\n${seoCopy.longDescription}${socialMediaTxt}`;
         await drive.files.create({
           requestBody: { name: `yoast-seo-ref-${ref}.txt`, parents: [folderId] },
           media: { mimeType: 'text/plain', body: Readable.from(Buffer.from(txtContent, 'utf-8')) }

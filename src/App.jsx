@@ -842,9 +842,8 @@ export default function App() {
                 </div>
                 <div id="tech-preview" style={{display:"none", background:"#fffbf5", border:"1px dashed #fed7aa", borderRadius:"8px", padding:"12px", marginTop:"8px", fontSize:"1rem", lineHeight:1.8}} />
               </div>
-
               {/* 3. Descripción Larga */}
-              <div style={{background:"linear-gradient(135deg,#f0fdf4,#dcfce7)", border:"1px solid #86efac", borderRadius:"12px", padding:"20px"}}>
+              <div style={{background:"linear-gradient(135deg,#f0fdf4,#dcfce7)", border:"1px solid #86efac", borderRadius:"12px", padding:"20px", marginBottom:"20px"}}>
                 <div style={{fontWeight:700, fontSize:"0.95rem", color:"#166534", marginBottom:"16px", display:"flex", alignItems:"center", justifyContent:"space-between"}}>
                   <span>📝 3. Descripción Larga (+300 palabras para WooCommerce)</span>
                   <button
@@ -858,6 +857,90 @@ export default function App() {
                   {seoData.longDescription}
                 </div>
               </div>
+
+              {/* 4. Copies para Redes Sociales */}
+              {seoData.socialMedia && (
+                <div style={{marginTop:"28px", borderTop:"2px solid #e5e7eb", paddingTop:"24px"}}>
+                  <h3 style={{fontSize:"1.15rem", marginBottom:"20px", display:"flex", alignItems:"center", gap:"10px", color:"#2563eb"}}>
+                    <Sparkles size={20} color="#2563eb" /> 📱 4. Copies para Redes Sociales (Bonetto Style)
+                  </h3>
+                  <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(240px, 1fr))", gap:"20px"}}>
+                    
+                    {/* Instagram */}
+                    <div style={{background:"linear-gradient(135deg,#fff0f6,#ffdeeb)", border:"1px solid #fcc2d7", borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", justifyContent:"space-between"}}>
+                      <div>
+                        <div style={{fontWeight:700, fontSize:"0.95rem", color:"#c2255c", marginBottom:"12px", display:"flex", alignItems:"center", gap:"8px"}}>
+                          📸 Instagram
+                        </div>
+                        <div style={{fontSize:"0.88rem", color:"#212529", background:"white", padding:"12px", borderRadius:"8px", border:"1px solid #ffdeeb", lineHeight:1.6, whiteSpace:"pre-wrap", minHeight:"100px", marginBottom:"12px"}}>
+                          {seoData.socialMedia.instagram}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => copyToClipboard(seoData.socialMedia.instagram || "", "instagram")}
+                        style={{width:"100%", background: copiedField==="instagram" ? "#059669" : "#d6336c", color:"white", border:"none", borderRadius:"6px", padding:"8px 12px", cursor:"pointer", fontSize:"0.8rem", fontWeight:600, transition:"background 0.2s"}}
+                      >
+                        {copiedField === "instagram" ? "✓ Copiado" : "Copiar Instagram"}
+                      </button>
+                    </div>
+
+                    {/* Facebook */}
+                    <div style={{background:"linear-gradient(135deg,#e7f5ff,#d0ebff)", border:"1px solid #a5d8ff", borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", justifyContent:"space-between"}}>
+                      <div>
+                        <div style={{fontWeight:700, fontSize:"0.95rem", color:"#1c7ed6", marginBottom:"12px", display:"flex", alignItems:"center", gap:"8px"}}>
+                          👥 Facebook
+                        </div>
+                        <div style={{fontSize:"0.88rem", color:"#212529", background:"white", padding:"12px", borderRadius:"8px", border:"1px solid #d0ebff", lineHeight:1.6, whiteSpace:"pre-wrap", minHeight:"100px", marginBottom:"12px"}}>
+                          {seoData.socialMedia.facebook}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => copyToClipboard(seoData.socialMedia.facebook || "", "facebook")}
+                        style={{width:"100%", background: copiedField==="facebook" ? "#059669" : "#1971c2", color:"white", border:"none", borderRadius:"6px", padding:"8px 12px", cursor:"pointer", fontSize:"0.8rem", fontWeight:600, transition:"background 0.2s"}}
+                      >
+                        {copiedField === "facebook" ? "✓ Copiado" : "Copiar Facebook"}
+                      </button>
+                    </div>
+
+                    {/* WhatsApp */}
+                    <div style={{background:"linear-gradient(135deg,#ebfbee,#d3f9d8)", border:"1px solid #b2f2bb", borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", justifyContent:"space-between"}}>
+                      <div>
+                        <div style={{fontWeight:700, fontSize:"0.95rem", color:"#2b8a3e", marginBottom:"12px", display:"flex", alignItems:"center", gap:"8px"}}>
+                          💬 WhatsApp
+                        </div>
+                        <div style={{fontSize:"0.88rem", color:"#212529", background:"white", padding:"12px", borderRadius:"8px", border:"1px solid #d3f9d8", lineHeight:1.6, whiteSpace:"pre-wrap", minHeight:"100px", marginBottom:"12px"}}>
+                          {seoData.socialMedia.whatsapp}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => copyToClipboard(seoData.socialMedia.whatsapp || "", "whatsapp")}
+                        style={{width:"100%", background: copiedField==="whatsapp" ? "#059669" : "#2f9e44", color:"white", border:"none", borderRadius:"6px", padding:"8px 12px", cursor:"pointer", fontSize:"0.8rem", fontWeight:600, transition:"background 0.2s"}}
+                      >
+                        {copiedField === "whatsapp" ? "✓ Copiado" : "Copiar WhatsApp"}
+                      </button>
+                    </div>
+
+                    {/* TikTok */}
+                    <div style={{background:"linear-gradient(135deg,#f8f9fa,#e9ecef)", border:"1px solid #dee2e6", borderRadius:"12px", padding:"20px", display:"flex", flexDirection:"column", justifyContent:"space-between"}}>
+                      <div>
+                        <div style={{fontWeight:700, fontSize:"0.95rem", color:"#343a40", marginBottom:"12px", display:"flex", alignItems:"center", gap:"8px"}}>
+                          🎵 TikTok
+                        </div>
+                        <div style={{fontSize:"0.88rem", color:"#212529", background:"white", padding:"12px", borderRadius:"8px", border:"1px solid #e9ecef", lineHeight:1.6, whiteSpace:"pre-wrap", minHeight:"100px", marginBottom:"12px"}}>
+                          {seoData.socialMedia.tiktok}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => copyToClipboard(seoData.socialMedia.tiktok || "", "tiktok")}
+                        style={{width:"100%", background: copiedField==="tiktok" ? "#059669" : "#212529", color:"white", border:"none", borderRadius:"6px", padding:"8px 12px", cursor:"pointer", fontSize:"0.8rem", fontWeight:600, transition:"background 0.2s"}}
+                      >
+                        {copiedField === "tiktok" ? "✓ Copiado" : "Copiar TikTok"}
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              )}
 
             </div>
           ) : (
