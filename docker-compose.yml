@@ -16,8 +16,8 @@ services:
     container_name: content-generator-backend
     build: ./backend
     restart: unless-stopped
-    expose:
-      - "5002"
+    ports:
+      - "127.0.0.1:5002:5002"
     env_file:
       - ./backend/.env
     volumes:
