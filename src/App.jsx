@@ -942,6 +942,31 @@ export default function App() {
                 </div>
               )}
 
+              {/* 5. Prompt para Nano Banana Pro */}
+              {seoData.nanoBananaPrompt && (
+                <div style={{marginTop:"28px", borderTop:"2px solid #e5e7eb", paddingTop:"24px"}}>
+                  <h3 style={{fontSize:"1.15rem", marginBottom:"20px", display:"flex", alignItems:"center", gap:"10px", color:"#d97706"}}>
+                    🍌 5. Prompt para Nano Banana Pro (Ambientación de Imagen)
+                  </h3>
+                  <div style={{background:"linear-gradient(135deg,#fef3c7,#fffbeb)", border:"1px solid #fde68a", borderRadius:"12px", padding:"20px"}}>
+                    <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"16px", flexWrap:"wrap", gap:"10px"}}>
+                      <span style={{fontSize:"0.9rem", color:"#78350f", fontWeight:600}}>
+                        Copia este prompt optimizado y pégalo en la IA para generar el escenario lifestyle:
+                      </span>
+                      <button
+                        onClick={() => copyToClipboard(seoData.nanoBananaPrompt || "", "nanoBananaPrompt")}
+                        style={{background: copiedField==="nanoBananaPrompt" ? "#059669" : "#d97706", color:"white", border:"none", borderRadius:"6px", padding:"8px 14px", cursor:"pointer", fontSize:"0.8rem", fontWeight:600, transition:"background 0.2s"}}
+                      >
+                        {copiedField === "nanoBananaPrompt" ? "✓ Copiado" : "📋 Copiar Prompt Integral"}
+                      </button>
+                    </div>
+                    <div style={{fontSize:"0.9rem", color:"#1f2937", background:"white", padding:"16px", borderRadius:"8px", border:"1px solid #fde68a", lineHeight:1.7, whiteSpace:"pre-wrap", maxHeight:"320px", overflowY:"auto"}}>
+                      {seoData.nanoBananaPrompt}
+                    </div>
+                  </div>
+                </div>
+              )}
+
             </div>
           ) : (
             <div style={{marginTop:"28px", padding:"20px", background:"#fafafa", border:"1px dashed #d1d5db", borderRadius:"12px", textAlign:"center", color:"#9ca3af"}}>

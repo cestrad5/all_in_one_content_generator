@@ -83,7 +83,8 @@ Genera un objeto JSON válido con la siguiente estructura exacta:
     "facebook": "copy aquí",
     "whatsapp": "copy aquí",
     "tiktok": "copy aquí"
-  }
+  },
+  "nanoBananaPrompt": "Prompt integral para Nano Banana Pro aquí"
 }
 
 Directrices estrictas para el contenido en el JSON:
@@ -123,7 +124,24 @@ Instrucciones por red:
 - instagram: Tono emocional y aspiracional. Incluye hashtags relevantes y al menos 2 palabras clave en tendencia del momento para productos de regalo o emprendimiento en Colombia.
 - facebook: Más descriptivo. Explica el uso y los beneficios del producto. Mantén cercanía y calidez.
 - whatsapp: Directo, máximo 3 líneas, orientado a venta inmediata. Sin hashtags. Incluye CTA suave como "Haz tu pedido" o "Escríbenos hoy".
-- tiktok: Dinámico, con hook de apertura impactante en la primera línea. Usa palabras clave virales actuales. Ritmo ágil, frases cortas.
+- tiktok: Dinámico, con hook de apertura impactante en la primera línea. Usa palabras clave virales actuales. Ritmo ágil, frases cotas.
+
+5. PROMPT PARA NANO BANANA PRO (nanoBananaPrompt):
+Genera un prompt estructurado integral en español para copiar y pegar en Nano Banana Pro para ambientar la imagen de este producto. El prompt debe ser redactado de la siguiente forma exacta:
+PRESERVE: El producto principal (${name}) debe permanecer exactamente igual: su forma, color, textura, materiales (${originalDescription}) y proporciones no deben cambiar. Mantenlo centrado, completamente visible, con una sombra suave y natural debajo. No alteres la perspectiva ni el ángulo del producto.
+CHANGE: Reemplaza el fondo actual por un escenario lifestyle creativo y fotorrealista coherente con su entorno de uso natural y típico para la categoría "${category}". Escribe una descripción detallada del fondo adaptada específicamente a este producto (${name}) e inspirada en estas directrices de la categoría:
+- Cajas y empaques: mesa de madera clara o escritorio de emprendedora, con props sutiles como flores pequeñas, taza de café o libro.
+- Alcancías: repisa decorativa o escritorio juvenil, con props como plantas pequeñas o cuadernos.
+- Porta Llaves: mesa de recibidor o pared neutra con textura suave, props mínimos como llaves decorativas o planta pequeña.
+- Portarretratos: sala acogedora o mesa auxiliar, con props como vela, libro o flor cortada.
+- Varios / Temporada: ambiente cálido, hogareño y coherente con el objeto.
+CONSTRAINTS:
+- Actúa como fotógrafo publicitario profesional y diseñador de producto.
+- Generar una imagen fotorrealista del producto en su entorno de uso natural y típico.
+- Iluminación suave, cálida y natural de estudio comercial, coherente con el producto.
+- Profundidad de campo suave (background ligeramente desenfocado con lente de 50mm o 85mm) para mantener el producto como protagonista visual.
+- Props secundarios de alta calidad que acompañen, nunca compitiendo ni tapando el producto. Composición limpia, moderna y estética premium. Sin texto, sin logos, ni marcas de agua. Relación de aspecto: 1:1 (cuadrado).
+UNACCEPTABLE: fondo con texto, producto distorsionado, producto recortado, props que tapen el producto, iluminación artificial dura.
 
 Devuelve exclusivamente el JSON sin código Markdown adicional alrededor, para que pueda ser parseado directamente con JSON.parse.`;
 
@@ -189,7 +207,8 @@ app.post('/api/upload-batch', upload.array('files', 20), async (req, res) => {
 
       if (seoCopy) {
         const socialMediaTxt = seoCopy.socialMedia ? `\n\n--- REDES SOCIALES ---\nInstagram:\n${seoCopy.socialMedia.instagram}\n\nFacebook:\n${seoCopy.socialMedia.facebook}\n\nWhatsApp:\n${seoCopy.socialMedia.whatsapp}\n\nTikTok:\n${seoCopy.socialMedia.tiktok}` : '';
-        const txtContent = `--- CONFIGURACIÓN YOAST SEO ---\nFrase clave: ${seoCopy.keyphrase}\n--- DESCRIPCIÓN LARGA ---\n${seoCopy.longDescription}${socialMediaTxt}`;
+        const nanoBananaTxt = seoCopy.nanoBananaPrompt ? `\n\n--- PROMPT NANO BANANA PRO ---\n${seoCopy.nanoBananaPrompt}` : '';
+        const txtContent = `--- CONFIGURACIÓN YOAST SEO ---\nFrase clave: ${seoCopy.keyphrase}\n--- DESCRIPCIÓN LARGA ---\n${seoCopy.longDescription}${socialMediaTxt}${nanoBananaTxt}`;
         await drive.files.create({
           requestBody: { name: `yoast-seo-ref-${ref}.txt`, parents: [folderId] },
           media: { mimeType: 'text/plain', body: Readable.from(Buffer.from(txtContent, 'utf-8')) }
