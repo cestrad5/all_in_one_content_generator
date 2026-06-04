@@ -320,6 +320,8 @@ export default function App() {
   const [driveUploading, setDriveUploading] = useState(false);
   const [driveProgress, setDriveProgress] = useState(0);
   const [driveProgressLabel, setDriveProgressLabel] = useState("");
+  const [seoData, setSeoData] = useState(null);
+  const [copiedField, setCopiedField] = useState("");
 
   const selectedMats = MATERIALS.filter(m => mats[m.key]);
   const matText = selectedMats.length === 1 ? MATERIAL_SLUG[selectedMats[0].key] : "madera";
@@ -487,6 +489,11 @@ export default function App() {
 
       setDriveProgress(100);
       setDriveProgressLabel("¡Imágenes guardadas en Drive y registradas en Google Sheets!");
+
+      // Guardar el bloque SEO generado por Gemini si vino en la respuesta
+      if (response.seoData) {
+        setSeoData(response.seoData);
+      }
       
       setTimeout(() => {
         setDriveUploading(false);
@@ -497,6 +504,13 @@ export default function App() {
       setError(`Error al guardar en Drive/Sheets: ${err.message}`);
       setDriveUploading(false);
     }
+  };
+
+  const copyToClipboard = (text, fieldName) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedField(fieldName);
+      setTimeout(() => setCopiedField(""), 2000);
+    });
   };
 
   const isProcessing = phase==="processing" || phase==="zipping";
@@ -755,13 +769,104 @@ export default function App() {
           </div>
 
           <div style={{marginTop:"24px"}}>
-            <h3 style={{fontSize:"1rem", marginBottom:"12px", display:"flex", alignItems:"center", gap:"8px"}}><Info size={18}/> Vista Previa SEO</h3>
+            <h3 style={{fontSize:"1rem", marginBottom:"12px", display:"flex", alignItems:"center", gap:"8px"}}><Info size={18}/> Vista Previa SEO — Imágenes</h3>
             <div style={{background:"#f9fafb", borderRadius:"12px", padding:"16px", border:"1px solid #e5e7eb", fontSize:"0.9rem"}}>
               <p style={{marginBottom:"8px"}}><strong style={{color:"var(--primary)"}}>Alt Text:</strong> {results[0].altText}</p>
               <p style={{marginBottom:"8px"}}><strong>Title:</strong> {results[0].title}</p>
               <p style={{marginBottom:"8px"}}><strong>Description:</strong> {results[0].description}</p>
             </div>
           </div>
+
+          {/* ── Bloque SEO Generado por Gemini ── */}
+          {seoData ? (
+            <div style={{marginTop:"32px", borderTop:"2px solid #e5e7eb", paddingTop:"28px"}} className="animate-fade-in">
+              <h3 style={{fontSize:"1.15rem", marginBottom:"20px", display:"flex", alignItems:"center", gap:"10px", color:"#7c3aed"}}>
+                <Sparkles size={20} color="#7c3aed" /> Copywriting SEO Generado por Gemini IA
+              </h3>
+
+              {/* 1. Configuración Yoast SEO */}
+              <div style={{background:"linear-gradient(135deg,#faf5ff,#ede9fe)", border:"1px solid #c4b5fd", borderRadius:"12px", padding:"20px", marginBottom:"20px"}}>
+                <div style={{fontWeight:700, fontSize:"0.95rem", color:"#5b21b6", marginBottom:"16px", display:"flex", alignItems:"center", gap:"8px"}}>
+                  🎯 1. Configuración Yoast SEO
+                </div>
+                {[
+                  ["Frase clave objetivo", seoData.keyphrase],
+                  ["Título SEO", seoData.seoTitle],
+                  ["Slug", seoData.slug],
+                  ["Meta descripción", seoData.metaDescription],
+                  ["Alt Text sugerido", seoData.altText],
+                ].map(([label, val]) => (
+                  <div key={label} style={{marginBottom:"12px"}}>
+                    <div style={{fontSize:"0.75rem", fontWeight:700, color:"#7c3aed", textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:"4px"}}>{label}</div>
+                    <div style={{display:"flex", alignItems:"flex-start", gap:"8px"}}>
+                      <div style={{flex:1, fontSize:"0.9rem", color:"#1f2937", background:"white", padding:"8px 12px", borderRadius:"8px", border:"1px solid #ddd6fe", lineHeight:1.5}}>{val}</div>
+                      <button
+                        onClick={() => copyToClipboard(val, label)}
+                        style={{flexShrink:0, background: copiedField===label ? "#059669" : "#7c3aed", color:"white", border:"none", borderRadius:"6px", padding:"8px 12px", cursor:"pointer", fontSize:"0.75rem", fontWeight:600, transition:"background 0.2s"}}
+                      >
+                        {copiedField === label ? "✓ Copiado" : "Copiar"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 2. Información Técnica HTML */}
+              <div style={{background:"linear-gradient(135deg,#fff7ed,#ffedd5)", border:"1px solid #fed7aa", borderRadius:"12px", padding:"20px", marginBottom:"20px"}}>
+                <div style={{fontWeight:700, fontSize:"0.95rem", color:"#c2410c", marginBottom:"16px", display:"flex", alignItems:"center", gap:"8px"}}>
+                  🔩 2. Información Técnica (HTML listo para WooCommerce)
+                </div>
+                <div style={{display:"flex", alignItems:"flex-start", gap:"8px", marginBottom:"12px"}}>
+                  <div
+                    style={{flex:1, fontSize:"0.9rem", background:"white", padding:"12px", borderRadius:"8px", border:"1px solid #fed7aa", fontFamily:"monospace", lineHeight:1.7, color:"#374151", whiteSpace:"pre-wrap", wordBreak:"break-word"}}
+                    dangerouslySetInnerHTML={{__html: seoData.technicalHtml?.replace(/\n/g, "<br/>") || ""}}
+                  />
+                  <div style={{display:"flex", flexDirection:"column", gap:"6px"}}>
+                    <button
+                      onClick={() => copyToClipboard(seoData.technicalHtml || "", "technicalHtml")}
+                      style={{background: copiedField==="technicalHtml" ? "#059669" : "#c2410c", color:"white", border:"none", borderRadius:"6px", padding:"8px 12px", cursor:"pointer", fontSize:"0.75rem", fontWeight:600, transition:"background 0.2s"}}
+                    >
+                      {copiedField === "technicalHtml" ? "✓ Copiado" : "Copiar HTML"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const raw = seoData.technicalHtml || "";
+                        const preview = document.getElementById("tech-preview");
+                        if (preview) { preview.innerHTML = raw; preview.style.display = preview.style.display === "none" ? "block" : "none"; }
+                      }}
+                      style={{background:"#ea580c", color:"white", border:"none", borderRadius:"6px", padding:"8px 12px", cursor:"pointer", fontSize:"0.75rem", fontWeight:600}}
+                    >
+                      Vista previa
+                    </button>
+                  </div>
+                </div>
+                <div id="tech-preview" style={{display:"none", background:"#fffbf5", border:"1px dashed #fed7aa", borderRadius:"8px", padding:"12px", marginTop:"8px", fontSize:"1rem", lineHeight:1.8}} />
+              </div>
+
+              {/* 3. Descripción Larga */}
+              <div style={{background:"linear-gradient(135deg,#f0fdf4,#dcfce7)", border:"1px solid #86efac", borderRadius:"12px", padding:"20px"}}>
+                <div style={{fontWeight:700, fontSize:"0.95rem", color:"#166534", marginBottom:"16px", display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+                  <span>📝 3. Descripción Larga (+300 palabras para WooCommerce)</span>
+                  <button
+                    onClick={() => copyToClipboard(seoData.longDescription || "", "longDescription")}
+                    style={{background: copiedField==="longDescription" ? "#059669" : "#166534", color:"white", border:"none", borderRadius:"6px", padding:"8px 14px", cursor:"pointer", fontSize:"0.8rem", fontWeight:600, transition:"background 0.2s"}}
+                  >
+                    {copiedField === "longDescription" ? "✓ Copiado" : "📋 Copiar Descripción"}
+                  </button>
+                </div>
+                <div style={{fontSize:"0.92rem", color:"#1f2937", background:"white", padding:"16px", borderRadius:"8px", border:"1px solid #86efac", lineHeight:1.8, whiteSpace:"pre-wrap", maxHeight:"420px", overflowY:"auto"}}>
+                  {seoData.longDescription}
+                </div>
+              </div>
+
+            </div>
+          ) : (
+            <div style={{marginTop:"28px", padding:"20px", background:"#fafafa", border:"1px dashed #d1d5db", borderRadius:"12px", textAlign:"center", color:"#9ca3af"}}>
+              <Sparkles size={28} style={{marginBottom:"10px", opacity:0.4}} />
+              <p style={{fontWeight:600, marginBottom:"6px"}}>El bloque SEO aún no se ha generado</p>
+              <p style={{fontSize:"0.85rem"}}>Haz clic en <strong>"Guardar en Drive"</strong> con una Gemini API Key configurada para generar automáticamente la Configuración Yoast SEO, la Información Técnica y la Descripción Larga.</p>
+            </div>
+          )}
           
         </div>
       )}
