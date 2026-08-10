@@ -312,14 +312,6 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef();
 
-  // Google Drive Integration States
-  const [googleFolderId, setGoogleFolderId] = useState(() => localStorage.getItem("opt_google_folder_id") || "");
-  const [googleGeminiKey, setGoogleGeminiKey] = useState(() => localStorage.getItem("opt_google_gemini_key") || "");
-  const [showDriveConfig, setShowDriveConfig] = useState(false);
-  
-  const [driveUploading, setDriveUploading] = useState(false);
-  const [driveProgress, setDriveProgress] = useState(0);
-  const [driveProgressLabel, setDriveProgressLabel] = useState("");
   const [seoData, setSeoData] = useState(null);
   const [copiedField, setCopiedField] = useState("");
 
@@ -337,9 +329,80 @@ export default function App() {
     setResults([]); setPhase("idle"); setProgress(0); setError("");
   };
 
+  const uploadProcessedBatch = async (processedResults) => {
+    const ref = productRef.trim();
+    setPhase("uploading");
+    setProgress(0);
+    setProgLabel("Subiendo imágenes y generando textos con IA local...");
+    setError("");
+
+    try {
+      const formData = new FormData();
+      const filenames = [];
+      
+      processedResults.forEach((item) => {
+        formData.append("files", item.compressedBlob, item.newName);
+        filenames.push(item.newName);
+      });
+      
+      formData.append("filenames", JSON.stringify(filenames));
+      formData.append("ref", ref);
+      formData.append("name", productName.trim());
+      formData.append("category", category);
+      formData.append("description", processedResults[0]?.description || "");
+
+      const xhr = new XMLHttpRequest();
+      
+      xhr.upload.addEventListener("progress", (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          setProgress(percentComplete);
+          setProgLabel(`Subiendo imágenes al servidor (${percentComplete}%)...`);
+        }
+      });
+
+      const uploadPromise = new Promise((resolve, reject) => {
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const res = JSON.parse(xhr.responseText);
+              resolve(res);
+            } catch (e) {
+              reject(new Error("Respuesta inválida del servidor."));
+            }
+          } else {
+            try {
+              const res = JSON.parse(xhr.responseText);
+              reject(new Error(res.error || `Error del servidor (${xhr.status})`));
+            } catch (e) {
+              reject(new Error(`Error en la subida (${xhr.status})`));
+            }
+          }
+        };
+        xhr.onerror = () => reject(new Error("Error de conexión con el servidor."));
+      });
+
+      xhr.open("POST", "/api/upload-batch");
+      xhr.send(formData);
+
+      const response = await uploadPromise;
+
+      if (response.seoData) {
+        setSeoData(response.seoData);
+      }
+      setPhase("done");
+      setProgLabel("");
+    } catch (err) {
+      console.error(err);
+      setError(`Error al generar copia SEO local: ${err.message}`);
+      setPhase("done");
+      setProgLabel("");
+    }
+  };
+
   const processImages = async () => {
-    if (!productName.trim() || files.length===0) {
-      setError("Ingresa un nombre de producto y carga imágenes."); return;
+    if (!productName.trim() || !productRef.trim() || files.length===0) {
+      setError("Ingresa un nombre de producto, la referencia (REF) y carga imágenes."); return;
     }
     
     setPhase("processing"); setProgress(0); setResults([]); setError(""); setModelProgress(null);
@@ -376,8 +439,14 @@ export default function App() {
       setPhase("idle"); return;
     }
     
-    setResults(out); setPhase("done"); setProgLabel("");
-    if (failedCount > 0) setError(`⚠️ ${failedCount} imágenes fallaron.`);
+    setResults(out);
+    if (failedCount > 0) {
+      setError(`⚠️ ${failedCount} imágenes fallaron.`);
+      setPhase("done");
+      setProgLabel("");
+    } else {
+      await uploadProcessedBatch(out);
+    }
   };
 
   const downloadZip = async () => {
@@ -409,103 +478,6 @@ export default function App() {
     triggerDownload(new Blob(["\uFEFF"+[heads.join(","),...rows].join("\n")],{type:"text/csv;charset=utf-8"}), `seo-${normalize(productName)}.csv`);
   };
 
-  const saveGoogleConfig = (folderId, geminiKey) => {
-    localStorage.setItem("opt_google_folder_id", folderId);
-    localStorage.setItem("opt_google_gemini_key", geminiKey);
-    setGoogleFolderId(folderId);
-    setGoogleGeminiKey(geminiKey);
-    setShowDriveConfig(false);
-  };
-
-  const uploadBatchToDrive = async () => {
-    const ref = productRef.trim();
-    if (!ref) {
-      setError("La referencia (REF) es obligatoria para guardar en Google Drive.");
-      return;
-    }
-    
-    setDriveUploading(true);
-    setDriveProgress(0);
-    setDriveProgressLabel("Preparando lote de archivos...");
-    setError("");
-
-    try {
-      const formData = new FormData();
-      const filenames = [];
-      
-      results.forEach((item) => {
-        formData.append("files", item.compressedBlob, item.newName);
-        filenames.push(item.newName);
-      });
-      
-      formData.append("filenames", JSON.stringify(filenames));
-      formData.append("ref", ref);
-      formData.append("name", productName.trim());
-      formData.append("category", category);
-      formData.append("description", results[0]?.description || "");
-      if (googleFolderId) {
-        formData.append("parentFolderId", googleFolderId.trim());
-      }
-
-      const xhr = new XMLHttpRequest();
-      
-      xhr.upload.addEventListener("progress", (event) => {
-        if (event.lengthComputable) {
-          const percentComplete = Math.round((event.loaded / event.total) * 90);
-          setDriveProgress(percentComplete);
-          setDriveProgressLabel(`Subiendo imágenes al servidor (${percentComplete}%)...`);
-        }
-      });
-
-      const uploadPromise = new Promise((resolve, reject) => {
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const res = JSON.parse(xhr.responseText);
-              resolve(res);
-            } catch (e) {
-              reject(new Error("Respuesta inválida del servidor."));
-            }
-          } else {
-            try {
-              const res = JSON.parse(xhr.responseText);
-              reject(new Error(res.error || `Error del servidor (${xhr.status})`));
-            } catch (e) {
-              reject(new Error(`Error en la subida (${xhr.status})`));
-            }
-          }
-        };
-        xhr.onerror = () => reject(new Error("Error de conexión con el servidor."));
-      });
-
-      xhr.open("POST", "/api/upload-batch");
-      if (googleGeminiKey) {
-        xhr.setRequestHeader("x-gemini-key", googleGeminiKey.trim());
-      }
-      xhr.send(formData);
-
-      setDriveProgressLabel("Enviando archivos y alimentando Google Sheets...");
-      const response = await uploadPromise;
-
-      setDriveProgress(100);
-      setDriveProgressLabel("¡Imágenes guardadas en Drive y registradas en Google Sheets!");
-
-      // Guardar el bloque SEO generado por Gemini si vino en la respuesta
-      if (response.seoData) {
-        setSeoData(response.seoData);
-      }
-      
-      setTimeout(() => {
-        setDriveUploading(false);
-      }, 5000);
-
-    } catch (err) {
-      console.error(err);
-      setError(`Error al guardar en Drive/Sheets: ${err.message}`);
-      setDriveUploading(false);
-    }
-  };
-
   const copyToClipboard = (text, fieldName) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedField(fieldName);
@@ -513,7 +485,7 @@ export default function App() {
     });
   };
 
-  const isProcessing = phase==="processing" || phase==="zipping";
+  const isProcessing = phase==="processing" || phase==="zipping" || phase==="uploading";
   const previewName = productName ? `${productRef?`ref-${productRef}-`:""}${normalize(productName)||"…"}-${normalize(category)}-${matText}${addBonetto?"-bonetto":""}${addNum?"-001":""}.webp` : null;
   const totalSavings = results.reduce((s,r)=>s+r.originalSize,0) > 0 ? Math.round((1 - results.reduce((s,r)=>s+r.compressedSize,0)/results.reduce((s,r)=>s+r.originalSize,0))*100) : 0;
 
@@ -671,71 +643,10 @@ export default function App() {
             </div>
           </div>
 
-          {/* Configuración de Google Drive */}
-          {showDriveConfig && (
-            <div className="drive-panel animate-fade-in" style={{ padding: "20px", border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: "12px", marginBottom: "20px" }}>
-              <div className="drive-config-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                <h4 style={{ margin: 0, color: "#1e3a8a", display: "flex", alignItems: "center", gap: "8px" }}><Settings size={18}/> Configuración de Google Drive & AI</h4>
-                <button className="btn-icon-only" onClick={() => setShowDriveConfig(false)}><X size={14}/></button>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-                <div>
-                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>ID de Carpeta Destino (Opcional)</label>
-                  <input 
-                    className="input-field" 
-                    placeholder="ID de carpeta (raíz por defecto)" 
-                    value={googleFolderId} 
-                    onChange={e => setGoogleFolderId(e.target.value)} 
-                    style={{ border: "1px solid #93c5fd" }}
-                  />
-                  <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
-                    Las nuevas carpetas se crearán dentro de esta carpeta.
-                  </div>
-                </div>
-                <div>
-                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>Motor de IA (Copia SEO)</label>
-                  <input 
-                    type="text"
-                    className="input-field" 
-                    value="Ollama (Llama 3.1 en local VPS)" 
-                    disabled
-                    style={{ border: "1px solid #93c5fd", background: "#dbeafe", color: "#1e40af", fontWeight: "600" }}
-                  />
-                  <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
-                    Ejecutándose localmente en la VPS de Oracle para evitar consumo de APIs externas.
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                <button className="btn btn-outline" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => setShowDriveConfig(false)}>Cancelar</button>
-                <button className="btn btn-primary" style={{ padding: "8px 16px", fontSize: "0.85rem" }} onClick={() => saveGoogleConfig(googleFolderId, googleGeminiKey)}>Guardar</button>
-              </div>
-            </div>
-          )}
-
           <div style={{display:"flex", flexWrap:"wrap", gap:"16px", justifyContent:"center", paddingBottom:"20px", borderBottom:"1px solid rgba(0,0,0,0.05)"}}>
             <button className="btn btn-primary" onClick={downloadZip}><Archive size={18}/> Descargar Lote (.zip)</button>
             <button className="btn btn-secondary" onClick={downloadCSV}><FileText size={18}/> Bajar Metadata (.csv)</button>
-            <button className="btn btn-drive" onClick={uploadBatchToDrive} disabled={driveUploading || results.length === 0}>
-              <CloudUpload size={18}/> Guardar en Drive
-            </button>
-            <button className="btn btn-icon-only" title="Configurar Google Drive" onClick={() => setShowDriveConfig(!showDriveConfig)}>
-              <Settings size={18}/>
-            </button>
           </div>
-
-          {/* Progreso de subida a Google Drive */}
-          {driveUploading && (
-            <div className="drive-progress-card animate-fade-in">
-              <div style={{ marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h4 style={{ color: "#166534", margin: 0, fontSize: "0.95rem", display: "flex", alignItems: "center", gap: "6px" }}><Cloud size={16}/> {driveProgressLabel}</h4>
-                <span style={{ fontWeight: 700, color: "#166534", fontSize: "0.95rem" }}>{driveProgress}%</span>
-              </div>
-              <div className="progress-container" style={{ background: "#d1fae5", height: "10px" }}>
-                <div className="progress-fill" style={{ width: `${driveProgress}%`, background: "linear-gradient(90deg, #34d399, #059669)" }} />
-              </div>
-            </div>
-          )}
 
           <div style={{marginTop:"24px"}}>
             <h3 style={{fontSize:"1rem", marginBottom:"12px", display:"flex", alignItems:"center", gap:"8px"}}><ImageIcon size={18}/> Imágenes Procesadas ({results.length})</h3>
