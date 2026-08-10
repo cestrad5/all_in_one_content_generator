@@ -410,12 +410,9 @@ export default function App() {
     
     setResults(out);
     if (failedCount > 0) {
-      setError(`⚠️ ${failedCount} imágenes fallaron.`);
-      setPhase("done");
-      setProgLabel("");
-    } else {
-      await generateSeoText(out);
+      setError(`⚠️ ${failedCount} imágenes fallaron. Se generará el bloque SEO de todos modos.`);
     }
+    await generateSeoText(out);
   };
 
   const downloadZip = async () => {
@@ -852,7 +849,7 @@ export default function App() {
             <div style={{marginTop:"28px", padding:"20px", background:"#fafafa", border:"1px dashed #d1d5db", borderRadius:"12px", textAlign:"center", color:"#9ca3af"}}>
               <Sparkles size={28} style={{marginBottom:"10px", opacity:0.4}} />
               <p style={{fontWeight:600, marginBottom:"6px"}}>El bloque SEO aún no se ha generado</p>
-              <p style={{fontSize:"0.85rem"}}>Haz clic en <strong>"Guardar en Drive"</strong> para generar automáticamente la Configuración Yoast SEO, la Información Técnica, la Descripción Larga, copies de redes sociales y prompt de Nano Banana con el LLM local de la VPS.</p>
+              <p style={{fontSize:"0.85rem"}}>El texto SEO se genera automáticamente al finalizar el procesamiento de imágenes con el <strong>LLM local de la VPS (Llama 3.1)</strong>. Ingresa los datos del producto, carga las imágenes y presiona <strong>"Procesar Lote Mágico"</strong>.</p>
             </div>
           )}
           
