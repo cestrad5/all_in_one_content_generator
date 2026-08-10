@@ -3,6 +3,7 @@ const cors = require('cors');
 const multer = require('multer');
 const { google } = require('googleapis');
 const { Readable } = require('stream');
+const http = require('http');
 require('dotenv').config();
 
 const app = express();
@@ -136,24 +137,40 @@ UNACCEPTABLE: fondo con texto, producto distorsionado, producto recortado, props
 
 Devuelve exclusivamente el JSON sin código Markdown adicional alrededor, para que pueda ser parseado directamente con JSON.parse.`;
 
-    const response = await fetch(`${ollamaUrl}/api/generate`, {
+    const url = new URL(`${ollamaUrl}/api/generate`);
+    const options = {
+      hostname: url.hostname,
+      port: url.port || 80,
+      path: url.pathname,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
+      }
+    };
+
+    const responseBody = await new Promise((resolve, reject) => {
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            resolve(data);
+          } else {
+            reject(new Error(`Ollama responded with status: ${res.statusCode}`));
+          }
+        });
+      });
+      req.on('error', (err) => { reject(err); });
+      req.write(JSON.stringify({
         model: ollamaModel,
         prompt: prompt,
         format: 'json',
         stream: false
-      })
+      }));
+      req.end();
     });
 
-    if (!response.ok) {
-      throw new Error(`Ollama responded with status: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = JSON.parse(responseBody);
     let text = data.response;
     
     // Limpieza de bloques de código markdown
