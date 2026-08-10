@@ -693,17 +693,16 @@ export default function App() {
                   </div>
                 </div>
                 <div>
-                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>Gemini API Key (Opcional)</label>
+                  <label className="input-label" style={{ fontWeight: 600, fontSize: "0.85rem", color: "#1e3a8a" }}>Motor de IA (Copia SEO)</label>
                   <input 
-                    type="password"
+                    type="text"
                     className="input-field" 
-                    placeholder="AIzaSy..." 
-                    value={googleGeminiKey} 
-                    onChange={e => setGoogleGeminiKey(e.target.value)} 
-                    style={{ border: "1px solid #93c5fd" }}
+                    value="Ollama (Llama 3.1 en local VPS)" 
+                    disabled
+                    style={{ border: "1px solid #93c5fd", background: "#dbeafe", color: "#1e40af", fontWeight: "600" }}
                   />
                   <div style={{ fontSize: "0.75rem", color: "#1e40af", marginTop: "4px" }}>
-                    Clave para habilitar el generador de copywriting SEO con IA.
+                    Ejecutándose localmente en la VPS de Oracle para evitar consumo de APIs externas.
                   </div>
                 </div>
               </div>
@@ -972,7 +971,7 @@ export default function App() {
             <div style={{marginTop:"28px", padding:"20px", background:"#fafafa", border:"1px dashed #d1d5db", borderRadius:"12px", textAlign:"center", color:"#9ca3af"}}>
               <Sparkles size={28} style={{marginBottom:"10px", opacity:0.4}} />
               <p style={{fontWeight:600, marginBottom:"6px"}}>El bloque SEO aún no se ha generado</p>
-              <p style={{fontSize:"0.85rem"}}>Haz clic en <strong>"Guardar en Drive"</strong> con una Gemini API Key configurada para generar automáticamente la Configuración Yoast SEO, la Información Técnica y la Descripción Larga.</p>
+              <p style={{fontSize:"0.85rem"}}>Haz clic en <strong>"Guardar en Drive"</strong> para generar automáticamente la Configuración Yoast SEO, la Información Técnica, la Descripción Larga, copies de redes sociales y prompt de Nano Banana con el LLM local de la VPS.</p>
             </div>
           )}
           

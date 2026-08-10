@@ -3,7 +3,6 @@ const cors = require('cors');
 const multer = require('multer');
 const { google } = require('googleapis');
 const { Readable } = require('stream');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 
 const app = express();
@@ -47,20 +46,12 @@ const getGoogleAuth = () => {
       'https://www.googleapis.com/auth/spreadsheets'
     ]
   });
-};
-
-// Generador de Copia SEO usando Gemini
+};// Generador de Copia SEO usando Ollama Local
 async function generateSeoCopy(apiKey, ref, name, category, originalDescription) {
-  if (!apiKey) {
-    console.log('Gemini API Key no proporcionada. Usando fallback.');
-    return null;
-  }
+  const ollamaUrl = process.env.OLLAMA_URL || 'http://ollama:11434';
+  const ollamaModel = process.env.OLLAMA_MODEL || 'llama3.1';
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    // Usar gemini-2.5-flash por velocidad y precisión
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-
     const prompt = `Actúa como un experto en SEO y Copywriting para comercio electrónico, especializado en la plataforma Yoast SEO y redacción persuasiva de marca. Tu objetivo es optimizar los metadatos y redactar la descripción de un producto artesanal de madera de Bonetto con Amor.
 
 Datos del producto a trabajar:
@@ -145,13 +136,31 @@ UNACCEPTABLE: fondo con texto, producto distorsionado, producto recortado, props
 
 Devuelve exclusivamente el JSON sin código Markdown adicional alrededor, para que pueda ser parseado directamente con JSON.parse.`;
 
-    const result = await model.generateContent(prompt);
-    let text = result.response.text();
+    const response = await fetch(`${ollamaUrl}/api/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: ollamaModel,
+        prompt: prompt,
+        format: 'json',
+        stream: false
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama responded with status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    let text = data.response;
+    
     // Limpieza de bloques de código markdown
     text = text.replace(/```json/g, '').replace(/```/g, '').trim();
     return JSON.parse(text);
   } catch (err) {
-    console.error('Error llamando a Gemini API:', err);
+    console.error('Error llamando a la API de Ollama:', err);
     return null;
   }
 }

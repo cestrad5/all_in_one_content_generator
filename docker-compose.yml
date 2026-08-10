@@ -25,8 +25,12 @@ services:
       - /opt/all_in_one_content_generator/backend/service-account.json:/app/service-account.json:ro
     networks:
       - app-network
+      - n8n_default
 
 networks:
   app-network:
     driver: bridge
+  n8n_default:
+    external: true
+
 
