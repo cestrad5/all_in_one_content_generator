@@ -329,66 +329,35 @@ export default function App() {
     setResults([]); setPhase("idle"); setProgress(0); setError("");
   };
 
-  const uploadProcessedBatch = async (processedResults) => {
+  const generateSeoText = async (processedResults) => {
     const ref = productRef.trim();
     setPhase("uploading");
     setProgress(0);
-    setProgLabel("Subiendo imágenes y generando textos con IA local...");
+    setProgLabel("Generando textos SEO con IA local...");
     setError("");
 
     try {
-      const formData = new FormData();
-      const filenames = [];
-      
-      processedResults.forEach((item) => {
-        formData.append("files", item.compressedBlob, item.newName);
-        filenames.push(item.newName);
-      });
-      
-      formData.append("filenames", JSON.stringify(filenames));
-      formData.append("ref", ref);
-      formData.append("name", productName.trim());
-      formData.append("category", category);
-      formData.append("description", processedResults[0]?.description || "");
-
-      const xhr = new XMLHttpRequest();
-      
-      xhr.upload.addEventListener("progress", (event) => {
-        if (event.lengthComputable) {
-          const percentComplete = Math.round((event.loaded / event.total) * 100);
-          setProgress(percentComplete);
-          setProgLabel(`Subiendo imágenes al servidor (${percentComplete}%)...`);
-        }
+      const response = await fetch("/api/generate-seo", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          ref: ref,
+          name: productName.trim(),
+          category: category,
+          description: processedResults[0]?.description || ""
+        })
       });
 
-      const uploadPromise = new Promise((resolve, reject) => {
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const res = JSON.parse(xhr.responseText);
-              resolve(res);
-            } catch (e) {
-              reject(new Error("Respuesta inválida del servidor."));
-            }
-          } else {
-            try {
-              const res = JSON.parse(xhr.responseText);
-              reject(new Error(res.error || `Error del servidor (${xhr.status})`));
-            } catch (e) {
-              reject(new Error(`Error en la subida (${xhr.status})`));
-            }
-          }
-        };
-        xhr.onerror = () => reject(new Error("Error de conexión con el servidor."));
-      });
+      if (!response.ok) {
+        throw new Error(`Servidor respondió con código: ${response.status}`);
+      }
 
-      xhr.open("POST", "/api/upload-batch");
-      xhr.send(formData);
+      const res = await response.json();
 
-      const response = await uploadPromise;
-
-      if (response.seoData) {
-        setSeoData(response.seoData);
+      if (res.seoData) {
+        setSeoData(res.seoData);
       }
       setPhase("done");
       setProgLabel("");
@@ -445,7 +414,7 @@ export default function App() {
       setPhase("done");
       setProgLabel("");
     } else {
-      await uploadProcessedBatch(out);
+      await generateSeoText(out);
     }
   };
 
@@ -495,9 +464,10 @@ export default function App() {
         <h1 style={{ fontSize: "2.5rem", color: "var(--primary)", marginBottom: "8px", display:"flex", alignItems:"center", justifyContent:"center", gap:"12px" }}>
           <Sparkles size={32} /> Optimizador Bonetto
         </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: "1.1rem" }}>
+        <p style={{ color: "var(--text-muted)", fontSize: "1.1rem", marginBottom: "4px" }}>
           Recorte por IA · 1200x1200px · Optimización WebP y SEO
         </p>
+        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.2</div>
       </div>
 
       {error && phase !== "done" && (

@@ -255,6 +255,15 @@ app.post('/api/upload-batch', upload.array('files', 20), async (req, res) => {
   res.json({ success: true, seoGenerated: !!seoCopy, seoData: seoCopy || null });
 });
 
+// Ruta para generar copywriting SEO con LLM local por JSON
+app.post('/api/generate-seo', async (req, res) => {
+  const { ref, name, category, description } = req.body;
+  if (!ref) return res.status(400).json({ error: 'La referencia (ref) es obligatoria.' });
+
+  const seoCopy = await generateSeoCopy(null, ref, name, category, description);
+  res.json({ success: true, seoGenerated: !!seoCopy, seoData: seoCopy || null });
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor de optimización escuchando en el puerto ${PORT}`);
 });
