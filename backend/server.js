@@ -166,7 +166,11 @@ Devuelve exclusivamente el JSON sin código Markdown adicional alrededor, para q
         model: ollamaModel,
         prompt: prompt,
         format: 'json',
-        stream: false
+        stream: false,
+        options: {
+          num_ctx: 8192,
+          num_predict: -1
+        }
       }));
       req.end();
     });

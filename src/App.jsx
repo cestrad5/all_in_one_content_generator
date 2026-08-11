@@ -502,7 +502,7 @@ export default function App() {
         <p style={{ color: "var(--text-muted)", fontSize: "1.1rem", marginBottom: "4px" }}>
           Recorte por IA · 1200x1200px · Optimización WebP y SEO
         </p>
-        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.4</div>
+        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.5</div>
       </div>
 
       {error && phase !== "done" && (
