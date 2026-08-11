@@ -358,7 +358,7 @@ export default function App() {
 
       // 2. Polling cada 5s hasta que el job termine
       let attempts = 0;
-      const maxAttempts = 60; // 5 min máximo
+      const maxAttempts = 180; // 15 min máximo (LLM en VPS sin GPU puede ser lento en frío)
       await new Promise((resolve, reject) => {
         const poll = async () => {
           attempts++;
