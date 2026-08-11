@@ -329,41 +329,44 @@ export default function App() {
     setResults([]); setPhase("idle"); setProgress(0); setError("");
   };
 
-  const generateSeoText = async (processedResults) => {
-    const ref = productRef.trim();
-    setPhase("uploading");
-    setProgress(0);
-    setProgLabel("Generando textos SEO con IA local...");
-    setError("");
+  const generateSeoText = async (data) => {
+    // data puede ser un objeto {ref,name,category,description} O un array de processedResults
+    const isArray = Array.isArray(data);
+    const ref    = isArray ? productRef.trim()              : data.ref;
+    const name   = isArray ? productName.trim()             : data.name;
+    const cat    = isArray ? category                       : data.category;
+    const desc   = isArray ? (data[0]?.description || "")  : data.description;
+
+    if (!ref) return;
+
+    setSeoData(null);
+    // Solo actualiza el label si no estamos procesando imágenes al mismo tiempo
+    setProgLabel(prev => prev || "Generando textos SEO con IA local…");
 
     try {
       const response = await fetch("/api/generate-seo", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          ref: ref,
-          name: productName.trim(),
-          category: category,
-          description: processedResults[0]?.description || ""
-        })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref, name, category: cat, description: desc })
       });
 
       if (!response.ok) {
-        throw new Error(`Servidor respondió con código: ${response.status}`);
+        const errText = await response.text();
+        throw new Error(`Servidor respondió ${response.status}: ${errText}`);
       }
 
       const res = await response.json();
 
       if (res.seoData) {
         setSeoData(res.seoData);
+      } else {
+        setError("⚠️ El LLM no retornó datos SEO. Revisa los logs del backend.");
       }
       setPhase("done");
       setProgLabel("");
     } catch (err) {
-      console.error(err);
-      setError(`Error al generar copia SEO local: ${err.message}`);
+      console.error("Error generateSeoText:", err);
+      setError(`Error al generar copia SEO: ${err.message}`);
       setPhase("done");
       setProgLabel("");
     }
@@ -374,9 +377,17 @@ export default function App() {
       setError("Ingresa un nombre de producto, la referencia (REF) y carga imágenes."); return;
     }
     
-    setPhase("processing"); setProgress(0); setResults([]); setError(""); setModelProgress(null);
+    setPhase("processing"); setProgress(0); setResults([]); setError(""); setModelProgress(null); setSeoData(null);
     const out = [];
     let failedCount = 0;
+
+    // 🚀 Lanzar generación SEO en paralelo (no espera a las imágenes)
+    const seoPromise = generateSeoText({
+      ref: productRef.trim(),
+      name: productName.trim(),
+      category,
+      description: matText.trim()
+    });
     
     for (let i = 0; i < files.length; i++) {
       setProgLabel(`Analizando imagen ${i+1}/${files.length}…`);
@@ -410,9 +421,10 @@ export default function App() {
     
     setResults(out);
     if (failedCount > 0) {
-      setError(`⚠️ ${failedCount} imágenes fallaron. Se generará el bloque SEO de todos modos.`);
+      setError(`⚠️ ${failedCount} imágenes fallaron. El bloque SEO se genera en paralelo.`);
     }
-    await generateSeoText(out);
+    // Esperar a que el SEO termine si aún no ha terminado
+    await seoPromise;
   };
 
   const downloadZip = async () => {
@@ -464,7 +476,7 @@ export default function App() {
         <p style={{ color: "var(--text-muted)", fontSize: "1.1rem", marginBottom: "4px" }}>
           Recorte por IA · 1200x1200px · Optimización WebP y SEO
         </p>
-        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.2</div>
+        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.3</div>
       </div>
 
       {error && phase !== "done" && (
