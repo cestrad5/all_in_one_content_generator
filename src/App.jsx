@@ -332,36 +332,61 @@ export default function App() {
   const generateSeoText = async (data) => {
     // data puede ser un objeto {ref,name,category,description} O un array de processedResults
     const isArray = Array.isArray(data);
-    const ref    = isArray ? productRef.trim()              : data.ref;
-    const name   = isArray ? productName.trim()             : data.name;
-    const cat    = isArray ? category                       : data.category;
-    const desc   = isArray ? (data[0]?.description || "")  : data.description;
+    const ref    = isArray ? productRef.trim()             : data.ref;
+    const name   = isArray ? productName.trim()            : data.name;
+    const cat    = isArray ? category                      : data.category;
+    const desc   = isArray ? (data[0]?.description || "") : data.description;
 
     if (!ref) return;
 
     setSeoData(null);
-    // Solo actualiza el label si no estamos procesando imágenes al mismo tiempo
     setProgLabel(prev => prev || "Generando textos SEO con IA local…");
 
     try {
-      const response = await fetch("/api/generate-seo", {
+      // 1. Lanzar el job (retorna inmediatamente con jobId)
+      const startRes = await fetch("/api/generate-seo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ref, name, category: cat, description: desc })
       });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Servidor respondió ${response.status}: ${errText}`);
+      if (!startRes.ok) {
+        const errText = await startRes.text();
+        throw new Error(`Error al lanzar job SEO: ${startRes.status} ${errText}`);
       }
+      const { jobId } = await startRes.json();
+      if (!jobId) throw new Error("El servidor no retornó un jobId");
 
-      const res = await response.json();
+      // 2. Polling cada 5s hasta que el job termine
+      let attempts = 0;
+      const maxAttempts = 60; // 5 min máximo
+      await new Promise((resolve, reject) => {
+        const poll = async () => {
+          attempts++;
+          try {
+            const pollRes = await fetch(`/api/seo-status/${jobId}`);
+            if (!pollRes.ok) { reject(new Error(`Error de polling: ${pollRes.status}`)); return; }
+            const job = await pollRes.json();
 
-      if (res.seoData) {
-        setSeoData(res.seoData);
-      } else {
-        setError("⚠️ El LLM no retornó datos SEO. Revisa los logs del backend.");
-      }
+            if (job.status === "done") {
+              if (job.seoData) {
+                setSeoData(job.seoData);
+                resolve();
+              } else {
+                reject(new Error("Job completado pero seoData es null"));
+              }
+            } else if (job.status === "error") {
+              reject(new Error(job.error || "El LLM falló"));
+            } else if (attempts >= maxAttempts) {
+              reject(new Error("Timeout: el LLM tardó más de 5 minutos"));
+            } else {
+              setProgLabel(`Generando SEO con Llama 3.1… (${attempts * 5}s)`);
+              setTimeout(poll, 5000);
+            }
+          } catch (e) { reject(e); }
+        };
+        setTimeout(poll, 5000); // primer poll a los 5s
+      });
+
       setPhase("done");
       setProgLabel("");
     } catch (err) {
@@ -371,6 +396,7 @@ export default function App() {
       setProgLabel("");
     }
   };
+
 
   const processImages = async () => {
     if (!productName.trim() || !productRef.trim() || files.length===0) {

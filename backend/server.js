@@ -49,8 +49,9 @@ const getGoogleAuth = () => {
   });
 };// Generador de Copia SEO usando Ollama Local
 async function generateSeoCopy(apiKey, ref, name, category, originalDescription) {
-  const ollamaUrl = process.env.OLLAMA_URL || 'http://ollama:11434';
+  const ollamaUrl = process.env.OLLAMA_URL || 'http://172.18.0.2:11434';
   const ollamaModel = process.env.OLLAMA_MODEL || 'llama3.1';
+  console.log(`[SEO] Iniciando generación para REF:${ref} | modelo:${ollamaModel} | url:${ollamaUrl}`);
 
   try {
     const prompt = `Actúa como un experto en SEO y Copywriting para comercio electrónico, especializado en la plataforma Yoast SEO y redacción persuasiva de marca. Tu objetivo es optimizar los metadatos y redactar la descripción de un producto artesanal de madera de Bonetto con Amor.
@@ -172,12 +173,18 @@ Devuelve exclusivamente el JSON sin código Markdown adicional alrededor, para q
 
     const data = JSON.parse(responseBody);
     let text = data.response;
+    console.log(`[SEO] Respuesta Ollama recibida (${text.length} chars). Parseando JSON...`);
     
     // Limpieza de bloques de código markdown
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(text);
+    text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    // Extraer solo el bloque JSON si hay texto extra
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No se encontró bloque JSON en la respuesta de Ollama');
+    const parsed = JSON.parse(jsonMatch[0]);
+    console.log('[SEO] JSON parseado correctamente. Campos:', Object.keys(parsed).join(', '));
+    return parsed;
   } catch (err) {
-    console.error('Error llamando a la API de Ollama:', err);
+    console.error('[SEO] Error llamando a Ollama:', err.message);
     return null;
   }
 }
@@ -255,13 +262,49 @@ app.post('/api/upload-batch', upload.array('files', 20), async (req, res) => {
   res.json({ success: true, seoGenerated: !!seoCopy, seoData: seoCopy || null });
 });
 
-// Ruta para generar copywriting SEO con LLM local por JSON
-app.post('/api/generate-seo', async (req, res) => {
+// Sistema de jobs asíncronos para generación SEO (evita timeouts HTTP)
+const seoJobs = new Map(); // jobId -> { status, seoData, error, createdAt }
+
+// POST /api/generate-seo → lanza el job y retorna jobId inmediatamente
+app.post('/api/generate-seo', (req, res) => {
   const { ref, name, category, description } = req.body;
   if (!ref) return res.status(400).json({ error: 'La referencia (ref) es obligatoria.' });
 
-  const seoCopy = await generateSeoCopy(null, ref, name, category, description);
-  res.json({ success: true, seoGenerated: !!seoCopy, seoData: seoCopy || null });
+  const jobId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  seoJobs.set(jobId, { status: 'pending', seoData: null, error: null, createdAt: Date.now() });
+
+  console.log(`[SEO] Job ${jobId} creado para REF:${ref}`);
+
+  // Ejecutar en background sin bloquear la respuesta HTTP
+  (async () => {
+    try {
+      const seoCopy = await generateSeoCopy(null, ref, name, category, description);
+      if (seoCopy) {
+        seoJobs.set(jobId, { status: 'done', seoData: seoCopy, error: null, createdAt: Date.now() });
+        console.log(`[SEO] Job ${jobId} completado exitosamente.`);
+      } else {
+        seoJobs.set(jobId, { status: 'error', seoData: null, error: 'El LLM no retornó datos válidos.', createdAt: Date.now() });
+        console.error(`[SEO] Job ${jobId} falló - LLM retornó null.`);
+      }
+    } catch (err) {
+      seoJobs.set(jobId, { status: 'error', seoData: null, error: err.message, createdAt: Date.now() });
+      console.error(`[SEO] Job ${jobId} falló con excepción:`, err.message);
+    }
+    // Limpiar jobs viejos (> 30 min)
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    for (const [id, job] of seoJobs) {
+      if (job.createdAt < cutoff) seoJobs.delete(id);
+    }
+  })();
+
+  res.json({ jobId, status: 'pending' });
+});
+
+// GET /api/seo-status/:jobId → polling para obtener resultado
+app.get('/api/seo-status/:jobId', (req, res) => {
+  const job = seoJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Job no encontrado' });
+  res.json(job);
 });
 
 app.listen(PORT, () => {
