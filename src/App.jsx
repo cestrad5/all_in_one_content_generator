@@ -119,7 +119,7 @@ function detectObjectBounds(canvas, bgRemoved) {
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
-async function processImageTo1200(file, enableBgRemoval, paddingPct, setDownloadProgress) {
+async function processImageTo1200(file, enableBgRemoval, paddingPct, setDownloadProgress, preserveBackground) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -136,7 +136,7 @@ async function processImageTo1200(file, enableBgRemoval, paddingPct, setDownload
           let bgRemoved = false;
           let bgRemovedError = null;
           
-          if (enableBgRemoval) {
+          if (enableBgRemoval && !preserveBackground) {
             try {
               const removeBackground = await loadImglyBackgroundRemoval();
               
@@ -174,7 +174,9 @@ async function processImageTo1200(file, enableBgRemoval, paddingPct, setDownload
             }
           }
           
-          const bounds = detectObjectBounds(processedCanvas, bgRemoved);
+          const bounds = preserveBackground
+            ? { x: 0, y: 0, width: processedCanvas.width, height: processedCanvas.height }
+            : detectObjectBounds(processedCanvas, bgRemoved);
           
           // ── Requerimiento: EXACTAMENTE 1200x1200px con fondo BLANCO ──
           const outputSize = 1200;
@@ -399,21 +401,23 @@ export default function App() {
   };
 
 
-  const processImages = async () => {
+  const processImages = async (preserveBackground = false) => {
     if (!productName.trim() || !productRef.trim() || files.length===0) {
       setError("Ingresa un nombre de producto, la referencia (REF) y carga imágenes."); return;
     }
-    
+
     setPhase("processing"); setProgress(0); setResults([]); setError(""); setModelProgress(null); setSeoData(null);
     const out = [];
     let failedCount = 0;
+    const doBgRemoval = enableBgRemoval && !preserveBackground;
 
     for (let i = 0; i < files.length; i++) {
       setProgLabel(`Analizando imagen ${i+1}/${files.length}…`);
       try {
         const { canvas, bgRemoved, bgRemovedError } = await processImageTo1200(
-          files[i], enableBgRemoval, paddingPct, 
-          (p) => { if(enableBgRemoval && i===0) { setProgLabel("Descargando IA de visión…"); setModelProgress(p); } }
+          files[i], doBgRemoval, paddingPct,
+          (p) => { if(doBgRemoval && i===0) { setProgLabel("Descargando IA de visión…"); setModelProgress(p); } },
+          preserveBackground
         );
         setModelProgress(null);
         setProgLabel(`Comprimiendo WebP ${i+1}/${files.length}…`);
@@ -615,11 +619,17 @@ export default function App() {
         </div>
       )}
 
-      <div style={{textAlign:"center", margin:"32px 0"}}>
-        <button className="btn btn-primary" style={{padding:"16px 40px", fontSize:"1.2rem"}} disabled={!productName.trim() || files.length===0 || isProcessing} onClick={processImages}>
+      <div style={{textAlign:"center", margin:"32px 0", display:"flex", gap:"16px", justifyContent:"center", flexWrap:"wrap"}}>
+        <button className="btn btn-primary" style={{padding:"16px 40px", fontSize:"1.2rem"}} disabled={!productName.trim() || files.length===0 || isProcessing} onClick={() => processImages(false)}>
           <Sparkles /> Procesar Lote Mágico
         </button>
+        <button className="btn btn-outline" style={{padding:"16px 40px", fontSize:"1.2rem"}} disabled={!productName.trim() || files.length===0 || isProcessing} onClick={() => processImages(true)}>
+          <ImageIcon /> Procesar Conservando Fondo
+        </button>
       </div>
+      <p style={{textAlign:"center", marginTop:"-24px", marginBottom:"32px", fontSize:"0.8rem", color:"var(--text-muted)"}}>
+        Usa "Conservar Fondo" para imágenes ya ambientadas con IA (sin recorte ni remoción de fondo).
+      </p>
 
       {phase === "done" && results.length > 0 && (
         <div className="glass-card animate-fade-in">
