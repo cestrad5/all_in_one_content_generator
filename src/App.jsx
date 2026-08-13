@@ -313,6 +313,8 @@ export default function App() {
   const fileRef = useRef();
 
   const [seoData, setSeoData] = useState(null);
+  const [seoLoading, setSeoLoading] = useState(false);
+  const [seoLabel, setSeoLabel] = useState("");
   const [copiedField, setCopiedField] = useState("");
 
   const selectedMats = MATERIALS.filter(m => mats[m.key]);
@@ -329,18 +331,17 @@ export default function App() {
     setResults([]); setPhase("idle"); setProgress(0); setError("");
   };
 
-  const generateSeoText = async (data) => {
-    // data puede ser un objeto {ref,name,category,description} O un array de processedResults
-    const isArray = Array.isArray(data);
-    const ref    = isArray ? productRef.trim()             : data.ref;
-    const name   = isArray ? productName.trim()            : data.name;
-    const cat    = isArray ? category                      : data.category;
-    const desc   = isArray ? (data[0]?.description || "") : data.description;
+  const generateSeoText = async () => {
+    const ref  = productRef.trim();
+    const name = productName.trim();
+    const cat  = category;
+    const desc = matText.trim();
 
-    if (!ref) return;
+    if (!ref) { setError("Ingresa la referencia (REF) para generar el copy."); return; }
 
     setSeoData(null);
-    setProgLabel(prev => prev || "Generando textos SEO con IA local…");
+    setSeoLoading(true);
+    setSeoLabel("Generando textos SEO con IA local…");
 
     try {
       // 1. Lanzar el job (retorna inmediatamente con jobId)
@@ -379,7 +380,7 @@ export default function App() {
             } else if (attempts >= maxAttempts) {
               reject(new Error("Timeout: el LLM tardó más de 5 minutos"));
             } else {
-              setProgLabel(`Generando SEO con Llama 3.1… (${attempts * 5}s)`);
+              setSeoLabel(`Generando SEO con Llama 3.1… (${attempts * 5}s)`);
               setTimeout(poll, 5000);
             }
           } catch (e) { reject(e); }
@@ -387,13 +388,13 @@ export default function App() {
         setTimeout(poll, 5000); // primer poll a los 5s
       });
 
-      setPhase("done");
-      setProgLabel("");
+      setSeoLoading(false);
+      setSeoLabel("");
     } catch (err) {
       console.error("Error generateSeoText:", err);
       setError(`Error al generar copia SEO: ${err.message}`);
-      setPhase("done");
-      setProgLabel("");
+      setSeoLoading(false);
+      setSeoLabel("");
     }
   };
 
@@ -407,14 +408,6 @@ export default function App() {
     const out = [];
     let failedCount = 0;
 
-    // 🚀 Lanzar generación SEO en paralelo (no espera a las imágenes)
-    const seoPromise = generateSeoText({
-      ref: productRef.trim(),
-      name: productName.trim(),
-      category,
-      description: matText.trim()
-    });
-    
     for (let i = 0; i < files.length; i++) {
       setProgLabel(`Analizando imagen ${i+1}/${files.length}…`);
       try {
@@ -447,10 +440,9 @@ export default function App() {
     
     setResults(out);
     if (failedCount > 0) {
-      setError(`⚠️ ${failedCount} imágenes fallaron. El bloque SEO se genera en paralelo.`);
+      setError(`⚠️ ${failedCount} imágenes fallaron.`);
     }
-    // Esperar a que el SEO termine si aún no ha terminado
-    await seoPromise;
+    setPhase("done");
   };
 
   const downloadZip = async () => {
@@ -502,7 +494,7 @@ export default function App() {
         <p style={{ color: "var(--text-muted)", fontSize: "1.1rem", marginBottom: "4px" }}>
           Recorte por IA · 1200x1200px · Optimización WebP y SEO
         </p>
-        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.5</div>
+        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.6</div>
       </div>
 
       {error && phase !== "done" && (
@@ -883,11 +875,20 @@ export default function App() {
               )}
 
             </div>
+          ) : seoLoading ? (
+            <div style={{marginTop:"28px", padding:"20px", background:"#faf5ff", border:"1px dashed #c4b5fd", borderRadius:"12px", textAlign:"center"}}>
+              <Sparkles size={28} style={{marginBottom:"10px", color:"#7c3aed"}} />
+              <p style={{fontWeight:600, marginBottom:"6px", color:"#5b21b6"}}>{seoLabel || "Generando copy con IA…"}</p>
+              <p style={{fontSize:"0.8rem", color:"#7c3aed"}}>Puede tardar 5-6 minutos. No cierres esta pestaña.</p>
+            </div>
           ) : (
             <div style={{marginTop:"28px", padding:"20px", background:"#fafafa", border:"1px dashed #d1d5db", borderRadius:"12px", textAlign:"center", color:"#9ca3af"}}>
               <Sparkles size={28} style={{marginBottom:"10px", opacity:0.4}} />
               <p style={{fontWeight:600, marginBottom:"6px"}}>El bloque SEO aún no se ha generado</p>
-              <p style={{fontSize:"0.85rem"}}>El texto SEO se genera automáticamente al finalizar el procesamiento de imágenes con el <strong>LLM local de la VPS (Llama 3.1)</strong>. Ingresa los datos del producto, carga las imágenes y presiona <strong>"Procesar Lote Mágico"</strong>.</p>
+              <p style={{fontSize:"0.85rem", marginBottom:"16px"}}>Genera el copy SEO con el <strong>LLM local de la VPS (Llama 3.1)</strong> cuando lo necesites (toma 5-6 min).</p>
+              <button className="btn btn-primary" onClick={generateSeoText}>
+                <Sparkles size={18}/> Crear Copy
+              </button>
             </div>
           )}
           
