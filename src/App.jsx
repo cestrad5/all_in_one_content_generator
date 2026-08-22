@@ -44,7 +44,7 @@ function buildMeta(productName, productRef, category, matText, index, total, add
   const refPart    = productRef ? `ref-${productRef}-` : "";
   const bonettoSfx = addBonetto ? "-bonetto" : "";
   const numSfx     = (addNum || total > 1) ? `-${String(index+1).padStart(3,"0")}` : "";
-  const newName    = `${refPart}${slug}-${catSlg}-${matText}${bonettoSfx}${numSfx}.png`;
+  const newName    = `${refPart}${slug}-${catSlg}-${matText}${bonettoSfx}${numSfx}.webp`;
   const altText    = `${productName.toLowerCase()} en madera ${matText} hecho a mano bonetto con amor colombia`.substring(0,125);
   const title      = `${productName} en ${matText.toUpperCase()} | Bonetto con Amor`;
   const caption    = `${productName} artesanal en madera ${matText} — Bonetto con Amor, hecho en Colombia`;
@@ -231,7 +231,7 @@ function compressImage(canvas, quality) {
     canvas.toBlob(blob => {
       if (blob) resolve({ blob });
       else reject(new Error("Canvas toBlob falló"));
-    }, "image/png");
+    }, "image/webp", quality);
   });
 }
 
@@ -495,7 +495,7 @@ export default function App() {
         <p style={{ color: "var(--text-muted)", fontSize: "1.1rem", marginBottom: "4px" }}>
           Recorte por IA · 1200x1200px · Optimización WebP y SEO
         </p>
-        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.4</div>
+        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.5</div>
       </div>
 
       {error && phase !== "done" && (
