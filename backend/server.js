@@ -47,7 +47,11 @@ const getGoogleAuth = () => {
       'https://www.googleapis.com/auth/spreadsheets'
     ]
   });
-};// Generador de Copia SEO usando Ollama Local
+};
+
+const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS) || 15 * 60 * 1000;
+
+// Generador de Copia SEO usando Ollama Local
 async function generateSeoCopy(apiKey, ref, name, category, originalDescription) {
   const ollamaUrl = process.env.OLLAMA_URL || 'http://172.18.0.2:11434';
   const ollamaModel = process.env.OLLAMA_MODEL || 'llama3.1';
@@ -141,12 +145,13 @@ Devuelve exclusivamente el JSON sin código Markdown adicional alrededor, para q
     const url = new URL(`${ollamaUrl}/api/generate`);
     const options = {
       hostname: url.hostname,
-      port: url.port || 80,
+      port: url.port || (url.protocol === 'https:' ? 443 : 11434),
       path: url.pathname,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: OLLAMA_TIMEOUT_MS
     };
 
     const responseBody = await new Promise((resolve, reject) => {
@@ -162,6 +167,9 @@ Devuelve exclusivamente el JSON sin código Markdown adicional alrededor, para q
         });
       });
       req.on('error', (err) => { reject(err); });
+      req.on('timeout', () => {
+        req.destroy(new Error(`Ollama no respondió en ${OLLAMA_TIMEOUT_MS / 1000}s`));
+      });
       req.write(JSON.stringify({
         model: ollamaModel,
         prompt: prompt,
@@ -205,6 +213,7 @@ app.post('/api/upload-batch', upload.array('files', 20), async (req, res) => {
   const geminiApiKey = req.headers['x-gemini-key'] || process.env.GEMINI_API_KEY;
 
   if (!ref) return res.status(400).json({ error: 'La referencia (ref) es obligatoria.' });
+  if (!files || files.length === 0) return res.status(400).json({ error: 'No se recibió ningún archivo.' });
 
   // 1. Generar Copywriting siempre primero
   const seoCopy = await generateSeoCopy(geminiApiKey, ref, name, category, description);
@@ -217,8 +226,9 @@ app.post('/api/upload-batch', upload.array('files', 20), async (req, res) => {
       const sheets = google.sheets({ version: 'v4', auth });
 
       const folderName = `REF-${ref.trim()}`;
+      const escapedName = folderName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const pFolderId = parentFolderId || process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID;
-      const folderQuery = `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and ${pFolderId ? `'${pFolderId}' in parents and ` : ""}trashed = false`;
+      const folderQuery = `name = '${escapedName}' and mimeType = 'application/vnd.google-apps.folder' and ${pFolderId ? `'${pFolderId}' in parents and ` : ""}trashed = false`;
       
       let folderId;
       const searchFolder = await drive.files.list({ q: folderQuery, fields: 'files(id)', spaces: 'drive' });

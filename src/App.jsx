@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from "react";
-import { Upload, X, Settings2, Download, Archive, Info, FileText, Image as ImageIcon, Sparkles, AlertCircle, Check, AlertTriangle, Cloud, CloudUpload, Settings } from "lucide-react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { Upload, X, Settings2, Download, Archive, Info, FileText, Image as ImageIcon, Sparkles, AlertCircle, Check, AlertTriangle } from "lucide-react";
+import { processImage, compressImage } from "./lib/imagePipeline";
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 const CATEGORIES = ["Alcancias", "Cajas y Empaques", "Porta Llaves", "Portarretratos", "Temporada", "Varios"];
@@ -25,11 +26,25 @@ const CAT_KW = {
 };
 const BASE_KW = "bonetto con amor, productos en madera, regalos personalizados, decoracion artesanal, hechos en colombia, emprendimientos colombianos";
 
+// targetKB: techo de peso por archivo. La calidad baja automáticamente hasta
+// cumplirlo, así ninguna imagen se cuela pesada al sitio.
 const QUALITY_PRESETS = {
-  alta:     { label:"Alta calidad",    webpQ:0.88, desc:"Mínima pérdida visual" },
-  media:    { label:"Balanceada ★",    webpQ:0.78, desc:"Mejor balance peso/calidad" },
-  agresiva: { label:"Máx. compresión", webpQ:0.65, desc:"Archivos más pequeños" },
+  alta:     { label:"Alta calidad",    webpQ:0.86, targetKB:220, sharpen:0.30, desc:"≤220 KB · mínima pérdida" },
+  media:    { label:"Balanceada ★",    webpQ:0.78, targetKB:120, sharpen:0.35, desc:"≤120 KB · mejor relación peso/calidad" },
+  agresiva: { label:"Máx. compresión", webpQ:0.68, targetKB:70,  sharpen:0.45, desc:"≤70 KB · lo más liviano" },
 };
+
+const SIZE_PRESETS = [
+  { size: 800,  label:"800 px",  desc:"Miniaturas y listados" },
+  { size: 1200, label:"1200 px", desc:"Ficha de producto ★" },
+  { size: 1600, label:"1600 px", desc:"Zoom de alta resolución" },
+];
+
+const MAX_FILES = 20;
+
+// Sufijos de nombre siempre activos (no hay control en la interfaz para ellos).
+const addBonetto = true;
+const addNum = true;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const normalize = t =>
@@ -53,196 +68,13 @@ function buildMeta(productName, productRef, category, matText, index, total, add
   return { newName, altText, title, caption, description: desc, keywords: kwList.join(", "), copyright:"© Bonetto con Amor - Colombia" };
 }
 
-// ── Remoción de Fondo & Procesamiento ─────────────────────────────────────────
-let imglyModule = null;
-
-async function loadImglyBackgroundRemoval() {
-  if (imglyModule) return imglyModule;
-  try {
-    const pkg = await import("@imgly/background-removal");
-    if (pkg.removeBackground) {
-      imglyModule = pkg.removeBackground;
-    } else if (typeof pkg.default === "function") {
-      imglyModule = pkg.default;
-    } else if (typeof pkg === "function") {
-      imglyModule = pkg;
-    } else if (pkg.default && pkg.default.removeBackground) {
-      imglyModule = pkg.default.removeBackground;
-    } else {
-      throw new Error("No se encontró la función removeBackground en el módulo");
-    }
-    return imglyModule;
-  } catch (err) {
-    throw new Error(`No se pudo cargar @imgly/background-removal: ${err.message}`);
-  }
-}
-
-function detectObjectBounds(canvas, bgRemoved) {
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-  
-  let minX = canvas.width, maxX = 0, minY = canvas.height, maxY = 0;
-  let pixelCount = 0;
-  
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const a = data[i + 3];
-    
-    let isObject = false;
-    if (bgRemoved) {
-      // Si se removió el fondo, el fondo es completamente transparente. Todo lo demás (a > 10) es el objeto.
-      isObject = a > 10;
-    } else {
-      // Fallback: Detectar píxeles que no son blancos puros y que no son transparentes.
-      isObject = a > 10 && (r < 250 || g < 250 || b < 250);
-    }
-    
-    if (isObject) {
-      const pixelIdx = i / 4;
-      const x = pixelIdx % canvas.width;
-      const y = Math.floor(pixelIdx / canvas.width);
-      
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
-      pixelCount++;
-    }
-  }
-  
-  if (maxX < minX || maxY < minY || pixelCount < 100) {
-    return { x: 0, y: 0, width: canvas.width, height: canvas.height };
-  }
-  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
-}
-
-async function processImageTo1200(file, enableBgRemoval, paddingPct, setDownloadProgress, preserveBackground) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const img = new Image();
-      img.onload = async () => {
-        try {
-          const originalCanvas = document.createElement("canvas");
-          originalCanvas.width = img.width;
-          originalCanvas.height = img.height;
-          const ctx = originalCanvas.getContext("2d");
-          ctx.drawImage(img, 0, 0);
-          
-          let processedCanvas = originalCanvas;
-          let bgRemoved = false;
-          let bgRemovedError = null;
-          
-          if (enableBgRemoval && !preserveBackground) {
-            try {
-              const removeBackground = await loadImglyBackgroundRemoval();
-              
-              // El config nos permite reportar el progreso si los modelos se están descargando.
-              const config = {
-                progress: (key, current, total) => {
-                  if (key.includes("fetch") && total && setDownloadProgress) {
-                     setDownloadProgress(Math.round((current / total) * 100));
-                  }
-                }
-              };
-              
-              // Pasamos el archivo directamente para evitar incompatibilidades con canvas en el SDK
-              const blob = await removeBackground(file, config);
-              if (setDownloadProgress) setDownloadProgress(100);
-              
-              const bgRemovedImg = new Image();
-              bgRemovedImg.src = URL.createObjectURL(blob);
-              await new Promise((res, rej) => {
-                bgRemovedImg.onload = res;
-                bgRemovedImg.onerror = () => rej(new Error("Error decodificando el resultado transparente"));
-              });
-              
-              const bgRemovedCanvas = document.createElement("canvas");
-              bgRemovedCanvas.width = bgRemovedImg.width;
-              bgRemovedCanvas.height = bgRemovedImg.height;
-              bgRemovedCanvas.getContext("2d").drawImage(bgRemovedImg, 0, 0);
-              
-              processedCanvas = bgRemovedCanvas;
-              bgRemoved = true;
-              URL.revokeObjectURL(bgRemovedImg.src);
-            } catch (bgErr) {
-              console.warn(`Fallo remoción de fondo: ${bgErr.message}`);
-              bgRemovedError = bgErr.message;
-            }
-          }
-          
-          const bounds = preserveBackground
-            ? { x: 0, y: 0, width: processedCanvas.width, height: processedCanvas.height }
-            : detectObjectBounds(processedCanvas, bgRemoved);
-          
-          // 1200x1200px con fondo TRANSPARENTE (sin fillRect → alpha = 0)
-          const outputSize = 1200;
-          const padding = Math.round((paddingPct / 100) * outputSize);
-          const contentSize = outputSize - (padding * 2);
-          
-          const outputCanvas = document.createElement("canvas");
-          outputCanvas.width = outputSize;
-          outputCanvas.height = outputSize;
-          const outCtx = outputCanvas.getContext("2d");
-          
-
-          // Centrado manteniendo el aspect ratio del recorte
-          const objAspect = bounds.width / bounds.height;
-          let drawWidth, drawHeight;
-          if (objAspect > 1) {
-            drawWidth = contentSize;
-            drawHeight = contentSize / objAspect;
-          } else {
-            drawHeight = contentSize;
-            drawWidth = contentSize * objAspect;
-          }
-          
-          const x = padding + (contentSize - drawWidth) / 2;
-          const y = padding + (contentSize - drawHeight) / 2;
-          
-          // Suavizado premium
-          outCtx.imageSmoothingEnabled = true;
-          outCtx.imageSmoothingQuality = "high";
-          
-          outCtx.drawImage(
-            processedCanvas,
-            bounds.x, bounds.y, bounds.width, bounds.height,
-            x, y, drawWidth, drawHeight
-          );
-          
-          resolve({ canvas: outputCanvas, width: outputSize, height: outputSize, bgRemoved, bgRemovedError });
-        } catch (err) {
-          reject(err);
-        }
-      };
-      img.onerror = () => reject(new Error("Error decodificando imagen"));
-      img.src = e.target.result;
-    };
-    reader.onerror = () => reject(new Error("Error leyendo archivo"));
-    reader.readAsDataURL(file);
-  });
-}
-
-function compressImage(canvas, quality) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(blob => {
-      if (blob) resolve({ blob });
-      else reject(new Error("Canvas toBlob falló"));
-    }, "image/webp", quality);
-  });
-}
-
 // ── JSZip Loader ──────────────────────────────────────────────────────────────
 async function getJSZip() {
-  if (window.JSZip) return window.JSZip;
   try {
     const pkg = await import("jszip");
     return pkg.default || pkg;
-  } catch (e) {
-    throw new Error("No se pudo cargar jszip");
+  } catch (err) {
+    throw new Error(`No se pudo cargar jszip: ${err.message}`, { cause: err });
   }
 }
 
@@ -255,35 +87,18 @@ function triggerDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
-const loadGsiScript = () => {
-  return new Promise((resolve) => {
-    if (window.google) {
-      resolve();
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    document.head.appendChild(script);
-  });
-};
-
 function ResultPreview({ blob, alt }) {
-  const [url, setUrl] = useState("");
-  
+  const url = useMemo(() => (blob ? URL.createObjectURL(blob) : ""), [blob]);
+
   useEffect(() => {
-    if (!blob) return;
-    const objectUrl = URL.createObjectURL(blob);
-    setUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
-  }, [blob]);
-  
+    if (!url) return undefined;
+    return () => URL.revokeObjectURL(url);
+  }, [url]);
+
   if (!url) {
     return <div className="result-thumb" style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.7rem", color: "var(--text-muted)" }}>...</div>;
   }
-  return <img src={url} alt={alt} className="result-thumb" />;
+  return <img src={url} alt={alt} className="result-thumb" loading="lazy" decoding="async" />;
 }
 
 // ── App Component ─────────────────────────────────────────────────────────────
@@ -293,11 +108,11 @@ export default function App() {
   const [category,    setCategory]    = useState("Temporada");
   const [mats, setMats] = useState({pino:true,mdf:true,vinilo:true,propalcote:true,propalcoteAdhesivo:true,cristal:true});
   
-  const [addBonetto, setAddBonetto] = useState(true);
-  const [addNum,     setAddNum]     = useState(true);
   const [enableBgRemoval, setEnableBgRemoval] = useState(true);
   const [paddingPct, setPaddingPct] = useState(6);
   const [qualityKey, setQualityKey] = useState("media");
+  const [outputSize, setOutputSize] = useState(1200);
+  const [highPrecision, setHighPrecision] = useState(true);
   
   const [files,    setFiles]    = useState([]);
   const [results,  setResults]  = useState([]);
@@ -326,8 +141,10 @@ export default function App() {
       setError("No se detectaron archivos de imagen válidos");
       return;
     }
-    setFiles(prev => [...prev, ...imgs].slice(0, 20));
-    setResults([]); setPhase("idle"); setProgress(0); setError("");
+    const merged = [...files, ...imgs];
+    setFiles(merged.slice(0, MAX_FILES));
+    setResults([]); setPhase("idle"); setProgress(0);
+    setError(merged.length > MAX_FILES ? `Solo se procesan ${MAX_FILES} imágenes por lote; se descartaron ${merged.length - MAX_FILES}.` : "");
   };
 
   const generateSeoText = async () => {
@@ -377,7 +194,7 @@ export default function App() {
             } else if (job.status === "error") {
               reject(new Error(job.error || "El LLM falló"));
             } else if (attempts >= maxAttempts) {
-              reject(new Error("Timeout: el LLM tardó más de 5 minutos"));
+              reject(new Error(`Timeout: el LLM superó los ${Math.round(maxAttempts * 5 / 60)} minutos`));
             } else {
               setSeoLabel(`Generando SEO con Llama 3.1… (${attempts * 5}s)`);
               setTimeout(poll, 5000);
@@ -405,31 +222,40 @@ export default function App() {
 
     setPhase("processing"); setProgress(0); setResults([]); setError(""); setModelProgress(null); setSeoData(null);
     const out = [];
-    let failedCount = 0;
+    const failures = [];
     const doBgRemoval = enableBgRemoval && !preserveBackground;
+    const targetBytes = preset.targetKB * 1024;
 
     for (let i = 0; i < files.length; i++) {
       setProgLabel(`Analizando imagen ${i+1}/${files.length}…`);
       try {
-        const { canvas, bgRemoved, bgRemovedError } = await processImageTo1200(
-          files[i], doBgRemoval, paddingPct,
-          (p) => { if(doBgRemoval && i===0) { setProgLabel("Descargando IA de visión…"); setModelProgress(p); } },
-          preserveBackground
-        );
+        const { canvas, bgRemoved, bgRemovedError } = await processImage(files[i], {
+          enableBgRemoval: doBgRemoval,
+          preserveBackground,
+          paddingPct,
+          outputSize,
+          sharpen: preset.sharpen,
+          highPrecision,
+          onModelProgress: (p) => {
+            if (doBgRemoval) { setProgLabel("Descargando IA de visión…"); setModelProgress(p); }
+          },
+        });
         setModelProgress(null);
         setProgLabel(`Comprimiendo WebP ${i+1}/${files.length}…`);
-        
-        const { blob } = await compressImage(canvas, preset.webpQ);
+
+        const { blob, quality } = await compressImage(canvas, preset.webpQ, targetBytes);
         const meta = buildMeta(productName.trim(), productRef.trim(), category, matText, i, files.length, addBonetto, addNum);
-        
+
         out.push({
           file: files[i], compressedBlob: blob, originalName: files[i].name,
           originalSize: files[i].size, compressedSize: blob.size,
-          dimensions: "1200×1200px", bgRemoved, bgRemovedError, ...meta
+          dimensions: `${outputSize}×${outputSize}px`,
+          finalQuality: quality, overTarget: blob.size > targetBytes,
+          bgRemoved, bgRemovedError, ...meta
         });
       } catch(err) {
-        console.error(err);
-        failedCount++;
+        console.error(`Fallo procesando ${files[i].name}:`, err);
+        failures.push(`${files[i].name}: ${err.message}`);
       }
       setProgress(Math.round(((i+1)/files.length)*100));
     }
@@ -440,8 +266,8 @@ export default function App() {
     }
     
     setResults(out);
-    if (failedCount > 0) {
-      setError(`⚠️ ${failedCount} imágenes fallaron.`);
+    if (failures.length > 0) {
+      setError(`⚠️ ${failures.length} imágenes fallaron: ${failures.join(" · ")}`);
     }
     setPhase("done");
   };
@@ -483,6 +309,7 @@ export default function App() {
   };
 
   const isProcessing = phase==="processing" || phase==="zipping" || phase==="uploading";
+  const canProcess = Boolean(productName.trim()) && Boolean(productRef.trim()) && files.length > 0 && !isProcessing;
   const previewName = productName ? `${productRef?`ref-${productRef}-`:""}${normalize(productName)||"…"}-${normalize(category)}-${matText}${addBonetto?"-bonetto":""}${addNum?"-001":""}.webp` : null;
   const totalSavings = results.reduce((s,r)=>s+r.originalSize,0) > 0 ? Math.round((1 - results.reduce((s,r)=>s+r.compressedSize,0)/results.reduce((s,r)=>s+r.originalSize,0))*100) : 0;
 
@@ -493,9 +320,9 @@ export default function App() {
           <Sparkles size={32} /> Optimizador Bonetto
         </h1>
         <p style={{ color: "var(--text-muted)", fontSize: "1.1rem", marginBottom: "4px" }}>
-          Recorte por IA · 1200x1200px · Optimización WebP y SEO
+          Recorte por IA · {outputSize}×{outputSize}px · Optimización WebP y SEO
         </p>
-        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.5</div>
+        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:2.0</div>
       </div>
 
       {error && phase !== "done" && (
@@ -549,11 +376,33 @@ export default function App() {
           <input type="checkbox" className="checkbox-input" checked={enableBgRemoval} onChange={e=>setEnableBgRemoval(e.target.checked)} />
           <span style={{color:"#166534", fontWeight:600}}>Remover fondo usando Inteligencia Artificial (Red Neuronal)</span>
         </label>
+
+        {enableBgRemoval && (
+          <label className="checkbox-row" style={{marginTop:"-8px", marginBottom:"20px", padding:"12px", background:"#f0f9ff", borderRadius:"8px", border:"1px solid #bae6fd"}}>
+            <input type="checkbox" className="checkbox-input" checked={highPrecision} onChange={e=>setHighPrecision(e.target.checked)} />
+            <span style={{color:"#075985", fontWeight:600}}>
+              Máxima precisión de borde (modelo completo)
+              <span style={{display:"block", fontWeight:400, fontSize:"0.8rem", color:"#0369a1"}}>
+                Bordes más limpios en cabello, calados y esquinas finas. Descarga un modelo más pesado la primera vez.
+              </span>
+            </span>
+          </label>
+        )}
         
-        <label className="input-label">Margen de seguridad: {paddingPct}% ({Math.round(1200 * paddingPct/100)}px)</label>
+        <label className="input-label">Margen de seguridad: {paddingPct}% ({Math.round(outputSize * paddingPct/100)}px)</label>
         <input type="range" className="range-slider" min="0" max="30" value={paddingPct} onChange={e=>setPaddingPct(Number(e.target.value))} style={{marginBottom:"24px"}}/>
         <div style={{fontSize:"0.8rem", color:"var(--text-muted)", marginTop:"-16px", marginBottom:"24px"}}>
-          Define cuánto espacio en blanco se dejará alrededor del producto en el lienzo final de 1200x1200px.
+          Define cuánto espacio transparente se dejará alrededor del producto en el lienzo final de {outputSize}×{outputSize}px.
+        </div>
+
+        <label className="input-label">Resolución de salida</label>
+        <div style={{display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:"12px", marginBottom:"24px"}}>
+          {SIZE_PRESETS.map(sp=>(
+            <div key={sp.size} className={`selection-card ${outputSize===sp.size?"selected":""}`} onClick={()=>setOutputSize(sp.size)}>
+              <div style={{fontWeight:700, marginBottom:"4px", color:outputSize===sp.size?"var(--primary)":"inherit"}}>{sp.label}</div>
+              <div style={{fontSize:"0.8rem", color:"var(--text-muted)"}}>{sp.desc}</div>
+            </div>
+          ))}
         </div>
 
         <label className="input-label">Calidad WebP de salida</label>
@@ -564,6 +413,9 @@ export default function App() {
               <div style={{fontSize:"0.8rem", color:"var(--text-muted)"}}>{p.desc}</div>
             </div>
           ))}
+        </div>
+        <div style={{fontSize:"0.8rem", color:"var(--text-muted)", marginTop:"10px"}}>
+          La calidad se ajusta sola en cada imagen hasta quedar bajo el techo de peso indicado.
         </div>
       </div>
 
@@ -610,17 +462,17 @@ export default function App() {
           {modelProgress !== null && (
             <div style={{marginTop:"10px", fontSize:"0.8rem", color:"#059669"}}>
               Descargando/Cargando modelo neuronal de alta precisión: {modelProgress}% 
-              <br/>(Solo se requiere descargar una vez, 84MB)
+              <br/>(Solo se descarga una vez y queda en caché del navegador)
             </div>
           )}
         </div>
       )}
 
       <div style={{textAlign:"center", margin:"32px 0", display:"flex", gap:"16px", justifyContent:"center", flexWrap:"wrap"}}>
-        <button className="btn btn-primary" style={{padding:"16px 40px", fontSize:"1.2rem"}} disabled={!productName.trim() || files.length===0 || isProcessing} onClick={() => processImages(false)}>
+        <button className="btn btn-primary" style={{padding:"16px 40px", fontSize:"1.2rem"}} disabled={!canProcess} onClick={() => processImages(false)}>
           <Sparkles /> Procesar Lote Mágico
         </button>
-        <button className="btn btn-outline" style={{padding:"16px 40px", fontSize:"1.2rem"}} disabled={!productName.trim() || files.length===0 || isProcessing} onClick={() => processImages(true)}>
+        <button className="btn btn-outline" style={{padding:"16px 40px", fontSize:"1.2rem"}} disabled={!canProcess} onClick={() => processImages(true)}>
           <ImageIcon /> Procesar Conservando Fondo
         </button>
       </div>
@@ -639,7 +491,7 @@ export default function App() {
             </div>
             <div style={{padding:"16px", background:"#f9fafb", borderRadius:"12px", textAlign:"center"}}>
               <div style={{fontSize:"0.85rem", color:"var(--text-muted)", textTransform:"uppercase", fontWeight:700}}>Resolución</div>
-              <div style={{fontSize:"2rem", fontWeight:800, color:"var(--text-main)"}}>1200x1200px</div>
+              <div style={{fontSize:"2rem", fontWeight:800, color:"var(--text-main)"}}>{outputSize}×{outputSize}px</div>
             </div>
             <div style={{padding:"16px", background:"#f9fafb", borderRadius:"12px", textAlign:"center"}}>
               <div style={{fontSize:"0.85rem", color:"var(--text-muted)", textTransform:"uppercase", fontWeight:700}}>Recortes IA Exitosos</div>
