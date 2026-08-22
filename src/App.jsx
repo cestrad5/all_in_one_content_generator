@@ -44,7 +44,7 @@ function buildMeta(productName, productRef, category, matText, index, total, add
   const refPart    = productRef ? `ref-${productRef}-` : "";
   const bonettoSfx = addBonetto ? "-bonetto" : "";
   const numSfx     = (addNum || total > 1) ? `-${String(index+1).padStart(3,"0")}` : "";
-  const newName    = `${refPart}${slug}-${catSlg}-${matText}${bonettoSfx}${numSfx}.webp`;
+  const newName    = `${refPart}${slug}-${catSlg}-${matText}${bonettoSfx}${numSfx}.png`;
   const altText    = `${productName.toLowerCase()} en madera ${matText} hecho a mano bonetto con amor colombia`.substring(0,125);
   const title      = `${productName} en ${matText.toUpperCase()} | Bonetto con Amor`;
   const caption    = `${productName} artesanal en madera ${matText} — Bonetto con Amor, hecho en Colombia`;
@@ -178,7 +178,7 @@ async function processImageTo1200(file, enableBgRemoval, paddingPct, setDownload
             ? { x: 0, y: 0, width: processedCanvas.width, height: processedCanvas.height }
             : detectObjectBounds(processedCanvas, bgRemoved);
           
-          // ── Requerimiento: EXACTAMENTE 1200x1200px con fondo BLANCO ──
+          // 1200x1200px con fondo TRANSPARENTE (sin fillRect → alpha = 0)
           const outputSize = 1200;
           const padding = Math.round((paddingPct / 100) * outputSize);
           const contentSize = outputSize - (padding * 2);
@@ -188,10 +188,7 @@ async function processImageTo1200(file, enableBgRemoval, paddingPct, setDownload
           outputCanvas.height = outputSize;
           const outCtx = outputCanvas.getContext("2d");
           
-          // Fondo blanco sólido
-          outCtx.fillStyle = "#ffffff";
-          outCtx.fillRect(0, 0, outputSize, outputSize);
-          
+
           // Centrado manteniendo el aspect ratio del recorte
           const objAspect = bounds.width / bounds.height;
           let drawWidth, drawHeight;
@@ -234,7 +231,7 @@ function compressImage(canvas, quality) {
     canvas.toBlob(blob => {
       if (blob) resolve({ blob });
       else reject(new Error("Canvas toBlob falló"));
-    }, "image/webp", quality);
+    }, "image/png");
   });
 }
 
@@ -498,7 +495,7 @@ export default function App() {
         <p style={{ color: "var(--text-muted)", fontSize: "1.1rem", marginBottom: "4px" }}>
           Recorte por IA · 1200x1200px · Optimización WebP y SEO
         </p>
-        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.6</div>
+        <div style={{ fontSize: "0.85rem", color: "var(--primary)", fontWeight: "600", opacity: 0.8 }}>v:1.4</div>
       </div>
 
       {error && phase !== "done" && (
